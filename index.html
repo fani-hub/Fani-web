@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fani Dinós Kalandja 🦖</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+            background-color: #cbdadb;
+            margin: 0;
+            padding-top: 30px;
+            user-select: none;
+        }
+        #gameCanvas {
+            background-color: #a3d5ff;
+            border: 4px solid #333;
+            border-radius: 8px;
+            display: block;
+            margin: 0 auto;
+            box-shadow: 0px 10px 20px rgba(0,0,0,0.2);
+            max-width: 100%;
+        }
+        h1 { color: #333; font-size: 28px; margin-bottom: 5px; }
+        p { font-size: 16px; color: #555; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <h1>Fani Dinós Kalandja 🦖</h1>
+    <p>Nyomd meg a <strong>SZÓKÖZ (Space)</strong> gombot vagy <strong>érintsd meg a képernyőt</strong> az ugráshoz!</p>
+    <canvas id="gameCanvas" width="800" height="300"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // Játék állapotok
+        let dinoY = 230;
+        let dinoVeloY = 0;
+        let isJumping = false;
+        const gravity = 0.6;
+
+        let obstacleX = 850;
+        let obstacleSpeed = 6;
+        let score = 0;
+        let isGameOver = false;
+
+        // Háttér elemek (Felhők és Hegyek)
+        const clouds = [{x: 100, y: 40, s: 0.2}, {x: 450, y: 70, s: 0.15}, {x: 700, y: 30, s: 0.25}];
+        
+        // Irányítás
+        document.addEventListener("keydown", function(event) {
+            if (event.code === "Space") { triggerJump(); event.preventDefault(); }
+        });
+        canvas.addEventListener("touchstart", function(event) {
+            triggerJump(); event.preventDefault();
+        });
+        canvas.addEventListener("mousedown", function() {
+            triggerJump();
+        });
+
+        function triggerJump() {
+            if (isGameOver) {
+                resetGame();
+            } else if (!isJumping) {
+                dinoVeloY = -12;
+                isJumping = true;
+            }
+        }
+
+        function resetGame() {
+            dinoY = 230; dinoVeloY = 0; isJumping = false;
+            obstacleX = 850; obstacleSpeed = 6; score = 0;
+            isGameOver = false;
+            update();
+        }
+
+        // Pixel-art Dínó
+        function drawDino(x, y) {
+            ctx.fillStyle = "#2d7a31"; 
+            ctx.fillRect(x+12, y, 20, 12); 
+            ctx.fillRect(x+28, y+4, 8, 4);   
+            ctx.fillRect(x+8, y+8, 24, 16); 
+            ctx.fillRect(x, y+12, 8, 8);    
+            ctx.fillRect(x-4, y+16, 4, 4);   
+            
+            ctx.fillStyle = "#fff"; 
+            ctx.fillRect(x+16, y+2, 4, 4);
+            ctx.fillStyle = "#000"; 
+            ctx.fillRect(x+18, y+2, 2, 2);
+
+            ctx.fillStyle = "#1e5221"; 
+            ctx.fillRect(x+12, y+24, 4, 6);
+            ctx.fillRect(x+20, y+24, 4, 6);
+        }
+
+        // Pixel-art Kaktusz
+        function drawCactus(x, y) {
+            ctx.fillStyle = "#3b8c40"; 
+            ctx.fillRect(x+8, y, 10, 40);   
+            ctx.fillRect(x, y+10, 8, 6);    
+            ctx.fillRect(x, y+4, 4, 8);     
+            ctx.fillRect(x+18, y+16, 8, 6); 
+            ctx.fillRect(x+22, y+8, 4, 10);  
+            
+            ctx.fillStyle = "#275e2b";
+            ctx.fillRect(x+10, y, 2, 40);
+        }
+
+        // Pixel-art Halálfej kirajzolása (Középre)
+        function drawSkull(cx, cy) {
+            ctx.fillStyle = "#ffffff";
+            
+            // Fő koponya rész (32x24 pixel méretű blokkokból felépítve)
+            ctx.fillRect(cx - 20, cy - 30, 40, 35); // homlok és arc
+            ctx.fillRect(cx - 12, cy + 5, 24, 10);  // állkapocs
+            
+            // Szemek (Fekete négyzetek)
+            ctx.fillStyle = "#111111";
+            ctx.fillRect(cx - 12, cy - 15, 8, 10); // bal szem
+            ctx.fillRect(cx + 4, cy - 15, 8, 10);  // jobb szem
+            
+            // Orr
+            ctx.fillRect(cx - 2, cy - 2, 4, 4);
+            
+            // Fogak rései (vonalak az állkapocson)
+            ctx.fillRect(cx - 6, cy + 8, 2, 8);
+            ctx.fillRect(cx + 4, cy + 8, 2, 8);
+        }
+
+        function update() {
+            if (isGameOver) return;
+
+            // Mozgások
+            dinoVeloY += gravity; dinoY += dinoVeloY;
+            if (dinoY >= 230) { dinoY = 230; isJumping = false; }
+
+            obstacleX -= obstacleSpeed;
+            if (obstacleX < -30) {
+                obstacleX = 850; score++;
+                if (obstacleSpeed < 15) obstacleSpeed += 0.4;
+            }
+
+            clouds.forEach(c => { c.x -= c.s; if(c.x < -60) c.x = 850; });
+
+            // Ütközés
+            if (obstacleX < 50 + 32 && obstacleX + 24 > 50 && dinoY + 30 > 230) {
+                isGameOver = true;
+            }
+
+            // --- RAJZOLÁS ---
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Égbolt és nap
+            ctx.fillStyle = "#fffae0";
+            ctx.beginPath(); ctx.arc(700, 60, 30, 0, Math.PI*2); ctx.fill();
+
+            // Felhők
+            ctx.fillStyle = "rgba(255,255,255,0.85)";
+            clouds.forEach(c => {
+                ctx.beginPath();
+                ctx.arc(c.x, c.y, 15, 0, Math.PI*2);
+                ctx.arc(c.x+15, c.y-5, 20, 0, Math.PI*2);
+                ctx.arc(c.x+35, c.y, 15, 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            // Hegyek
+            ctx.fillStyle = "#8a7db3"; 
+            ctx.beginPath(); ctx.moveTo(50, 240); ctx.lineTo(180, 100); ctx.lineTo(320, 240); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(250, 240); ctx.lineTo(420, 80); ctx.lineTo(580, 240); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(500, 240); ctx.lineTo(630, 120); ctx.lineTo(750, 240); ctx.fill();
+
+            ctx.fillStyle = "#ffffff"; 
+            ctx.beginPath(); ctx.moveTo(153, 130); ctx.lineTo(180, 100); ctx.lineTo(207, 130); ctx.lineTo(180, 120); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(386, 112); ctx.lineTo(420, 80); ctx.lineTo(454, 112); ctx.lineTo(420, 102); ctx.fill();
+
+            // Dombok
+            ctx.fillStyle = "#71b376";
+            ctx.beginPath(); ctx.arc(200, 320, 120, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(600, 340, 150, 0, Math.PI*2); ctx.fill();
+
+            // Talaj
+            ctx.fillStyle = "#e3cda4";
+            ctx.fillRect(0, 260, canvas.width, 40);
+            ctx.fillStyle = "#63563c"; 
+            ctx.fillRect(0, 260, canvas.width, 4);
+
+            // Szereplők
+            drawDino(50, dinoY);
+            drawCactus(obstacleX, 222);
+
+            // Pontszám
+            ctx.fillStyle = "#333";
+            ctx.font = "bold 20px Courier New";
+            ctx.fillText("SCORE: " + score, 650, 35);
+
+            // GAME OVER KÉPERNYŐ
+            if (isGameOver) {
+                // Sötét áttetsző háttér
+                ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Piros GAME OVER felirat
+                ctx.fillStyle = "#ff3333";
+                ctx.font = "bold 44px 'Courier New', monospace";
+                ctx.fillText("GAME OVER!", 280, 70);
+                
+                // Halálfej kirajzolása középre
+                drawSkull(400, 155);
+                
+                // Újraindítás szöveg alul
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "18px Arial";
+                ctx.fillText("Kattints vagy nyomj Szóközt az újraindításhoz!", 210, 245);
+            } else {
+                requestAnimationFrame(update);
+            }
+        }
+
+        update();
+    </script>
+
+</body>
+</html>
