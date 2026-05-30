@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fani 3D Űrhajó Szimulátor + BELSŐ BOLT 🚀💰</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: 'Courier New', monospace;
+            background-color: #020208;
+            margin: 0;
+            padding-top: 10px;
+            color: #fff;
+            user-select: none;
+            overflow: hidden;
+        }
+        #gameCanvas {
+            background-color: #000005;
+            border: 3px solid #00d2ff;
+            border-radius: 10px;
+            display: block;
+            margin: 0 auto;
+            box-shadow: 0px 0px 25px rgba(0, 210, 255, 0.4);
+            max-width: 100%;
+            touch-action: none;
+        }
+        h1 { color: #00d2ff; margin-bottom: 5px; text-shadow: 0 0 10px rgba(0,210,255,0.5); font-size: 20px; }
+        p { color: #888; font-size: 12px; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <h1>Fani 3D Űrhajó Szimulátor + BELSŐ BOLT 🚀💰</h1>
+    <p>Gép: Nyilak + Szóköz | Teló: Érintsd a Bal/Jobb oldalt | Bolt: Érintsd meg a menüt a kijelzőn</p>
+    <canvas id="gameCanvas" width="800" height="550"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // Játék változók
+        let score = 0;
+        let money = 0; // Gyűjthető pénz ($50 minden meteorért)
+        let health = 100;
+        let level = 1;
+        let isGameOver = false;
+        let isGameWon = false;
+
+        // Bolt fejlesztések állapota
+        let hasDoubleLaser = false;
+        let hudColor = "#00d2ff"; // Alap kék szín
+        let isGreenSkin = false;
+
+        // Űrhajó dőlése és pozíciója
+        let shipX = 0;
+        let shipY = 0;
+        let tilt = 0;
+
+        // Csillagok
+        let stars = [];
+        for(let i=0; i<60; i++) {
+            stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: Math.random() * 2 + 1 });
+        }
+
+        // Meteorok és Zászlók
+        let objects = [];
+        let spawnTimer = 0;
+        let lasers = [];
+        let shootTimer = 0;
+
+        // Gép irányítás
+        let keys = {};
+        document.addEventListener("keydown", (e) => {
+            keys[e.code] = true;
+            if (e.code === "Space" && !isGameOver && !isGameWon) {
+                shootLaser();
+            }
+            // Gépnél gyorsgombok a bolthoz a Game Over képernyőn
+            if (isGameOver) {
+                if (e.code === "Digit1" || e.code === "Numpad1") buyItem('shield', 200);
+                if (e.code === "Digit2" || e.code === "Numpad2") buyItem('laser', 400);
+                if (e.code === "Digit3" || e.code === "Numpad3") buyItem('skin', 600);
+                if (e.code === "Enter") resetGameTotal();
+            }
+            if (isGameWon && e.code === "Enter") resetGameTotal();
+        });
+        document.addEventListener("keyup", (e) => keys[e.code] = false);
+
+        // Telefonos érintés kezelése (Játék és Bolt)
+        let touchX = null;
+        canvas.addEventListener("touchstart", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            let clickX = ((e.touches[0].clientX - rect.left) / rect.width) * canvas.width;
+            let clickY = ((e.touches[0].clientY - rect.top) / rect.height) * canvas.height;
+
+            // HA GAME OVER VAN, A BOLT KATTINTÁSAIT FIGYELJÜK A KÉPERNYŐN
+            if (isGameOver) {
+                // 1. gomb: Pajzs / Folytatás
+                if (clickX >= 200 && clickX <= 600 && clickY >= 230 && clickY <= 275) {
+                    buyItem('shield', 200);
+                }
+                // 2. gomb: Dupla lézer
+                else if (clickX >= 200 && clickX <= 600 && clickY >= 290 && clickY <= 335) {
+                    buyItem('laser', 400);
+                }
+                // 3. gomb: Zöld skin
+                else if (clickX >= 200 && clickX <= 600 && clickY >= 350 && clickY <= 395) {
+                    buyItem('skin', 600);
+                }
+                // Új játék gomb legalul
+                else if (clickX >= 250 && clickX <= 550 && clickY >= 430 && clickY <= 470) {
+                    resetGameTotal();
+                }
+                return;
+            }
+
+            if (isGameWon) { resetGameTotal(); return; }
+            touchX = e.touches[0].clientX;
+        });
+
+        canvas.addEventListener("touchmove", (e) => { touchX = e.touches[0].clientX; });
+        canvas.addEventListener("touchend", () => { touchX = null; });
+
+        function shootLaser() {
+            if (hasDoubleLaser) {
+                // 4 sugarat lő ki egyszerre
+                lasers.push({ x: shipX - 0.15, y: shipY, z: 0.1 });
+                lasers.push({ x: shipX - 0.05, y: shipY, z: 0.1 });
+                lasers.push({ x: shipX + 0.05, y: shipY, z: 0.1 });
+                lasers.push({ x: shipX + 0.15, y: shipY, z: 0.1 });
+            } else {
+                // Alap dupla sugár középről
+                lasers.push({ x: shipX - 0.05, y: shipY, z: 0.1 });
+                lasers.push({ x: shipX + 0.05, y: shipY, z: 0.1 });
+            }
+        }
+
+        function spawnObject() {
+            let isFlag = Math.random() < 0.25;
+            objects.push({
+                x: Math.random() * 2 - 1,
+                y: Math.random() * 2 - 1,
+                z: 1,
+                isFlag: isFlag,
+                size: isFlag ? 20 : Math.random() * 30 + 20,
+                color: isFlag ? "#ffcc00" : (isGreenSkin ? "#00ff66" : "#00d2ff")
+            });
+        }
+
+        // BOLTI VÁSÁRLÁS
+        function buyItem(item, price) {
+            if (money >= price) {
+                money -= price;
+                if (item === 'shield') {
+                    health = 100;
+                    isGameOver = false; // AZONNAL FOLYTATHATJA A JÁTÉKOT!
+                    objects = []; lasers = [];
+                    animate();
+                }
+                else if (item === 'laser') {
+                    hasDoubleLaser = true;
+                }
+                else if (item === 'skin') {
+                    isGreenSkin = true;
+                    hudColor = "#00ff66"; // Átvált neon zöldre minden!
+                }
+            }
+        }
+
+        function resetGameTotal() {
+            score = 0; money = 0; health = 100; level = 1; isGameOver = false; isGameWon = false;
+            shipX = 0; shipY = 0; tilt = 0; objects = []; lasers = []; hasDoubleLaser = false;
+            hudColor = "#00d2ff"; isGreenSkin = false;
+            animate();
+        }
+
+        function animate() {
+            if (isGameOver || isGameWon) {
+                drawGameOverScreen();
+                return;
+            }
+
+            // Csillagok repülése
+            stars.forEach(star => { star.y += 2.5; if (star.y > canvas.height) star.y = 0; });
+
+            // Kormányzás gép/teló
+            let moveSpeed = 0.045;
+            if (keys["ArrowLeft"]) { shipX -= moveSpeed; tilt += (-0.16 - tilt) * 0.2; }
+            else if (keys["ArrowRight"]) { shipX += moveSpeed; tilt += (0.16 - tilt) * 0.2; }
+            else if (touchX !== null) {
+                const rect = canvas.getBoundingClientRect();
+                let relativeX = touchX - rect.left;
+                if (relativeX < rect.width / 2) { shipX -= moveSpeed; tilt += (-0.16 - tilt) * 0.2; }
+                else { shipX += moveSpeed; tilt += (0.16 - tilt) * 0.2; }
+            } else { tilt += (0 - tilt) * 0.1; }
+
+            if (keys["ArrowUp"]) shipY -= moveSpeed;
+            if (keys["ArrowDown"]) shipY += moveSpeed;
+
+            if (shipX < -0.9) shipX = -0.9; if (shipX > 0.9) shipX = 0.9;
+            if (shipY < -0.7) shipY = -0.7; if (shipY > 0.7) shipY = 0.7;
+
+            // Automata lövés telón
+            shootTimer++;
+            if (touchX !== null && shootTimer % 10 === 0) { shootLaser(); }
+
+            // Objektumok mozgása
+            spawnTimer++;
+            if (spawnTimer % 18 === 0) { spawnObject(); }
+
+            lasers.forEach((laser, lIdx) => { laser.z += 0.06; if (laser.z > 1) lasers.splice(lIdx, 1); });
+
+            objects.forEach((obj, oIdx) => {
+                obj.z -= 0.016 + (level * 0.004);
+
+                lasers.forEach((laser, lIdx) => {
+                    if (!obj.isFlag && Math.abs(laser.x - obj.x) < 0.22 && Math.abs(laser.y - obj.y) < 0.22 && Math.abs(laser.z - obj.z) < 0.1) {
+                        objects.splice(oIdx, 1);
+                        lasers.splice(lIdx, 1);
+                        score += 50;
+                        money += 50; // MINDEN METEORÉRT JÁR $50!
+                    }
+                });
+
+                if (obj.z <= 0.05) {
+                    if (Math.abs(obj.x - shipX) < 0.36 && Math.abs(obj.y - shipY) < 0.36) {
+                        if (obj.isFlag) {
+                            score += 150; money += 100;
+                            if (score >= level * 1200) { level++; }
+                        } else {
+                            health -= 25;
+                            if (health <= 0) isGameOver = true;
+                        }
+                    }
+                    objects.splice(oIdx, 1);
+                }
+            });
+
+            // RAJZOLÁS ALAPJÁTÉK
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#fff"; stars.forEach(star => ctx.fillRect(star.x, star.y, star.size, star.size));
+
+            objects.forEach(obj => {
+                let screenX = (canvas.width / 2) + (obj.x - shipX) * (1 / obj.z) * 200;
+                let screenY = (canvas.height / 2) + (obj.y - shipY) * (1 / obj.z) * 150;
+                let currentSize = obj.size * (1 / obj.z) * 0.5;
+
+                if (obj.z > 0.05 && currentSize > 0) {
+                    ctx.fillStyle = obj.color;
+                    if (obj.isFlag) {
+                        ctx.fillRect(screenX - currentSize/2, screenY - currentSize/2, currentSize, currentSize);
+                        ctx.fillStyle = "#000"; ctx.font = `bold ${currentSize*0.5}px Arial`;
+                        ctx.fillText("🚩", screenX - currentSize*0.3, screenY + currentSize*0.2);
+                    } else {
+                        ctx.shadowBlur = 12; ctx.shadowColor = obj.color;
+                        ctx.beginPath(); ctx.arc(screenX, screenY, currentSize / 2, 0, Math.PI * 2); ctx.fill();
+                        ctx.shadowBlur = 0;
+                    }
+                }
+            });
+
+            ctx.strokeStyle = hasDoubleLaser ? "#ffcc00" : "#ff0055"; ctx.lineWidth = hasDoubleLaser ? 5 : 3;
+            lasers.forEach(laser => {
+                let sX = (canvas.width / 2) + (laser.x - shipX) * (1 / laser.z) * 200;
+                let sY = (canvas.height / 2) + (laser.y - shipY) * (1 / laser.z) * 150;
+                ctx.beginPath(); ctx.moveTo(sX, sY); ctx.lineTo(sX, sY - 15); ctx.stroke();
+            });
+
+            // COCKPIT
+            ctx.save(); ctx.translate(canvas.width / 2, canvas.height / 2); ctx.rotate(tilt);
+            ctx.strokeStyle = "#12131a"; ctx.lineWidth = 25; ctx.strokeRect(-canvas.width/2 + 20, -canvas.height/2 + 20, canvas.width - 40, canvas.height - 100);
+
+            // Célkereszt
+            ctx.strokeStyle = hudColor; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(-40, 0); ctx.lineTo(-15, 0); ctx.moveTo(15, 0); ctx.lineTo(40, 0); ctx.stroke();
+
+            // Panel alul
+            ctx.fillStyle = "#0a0b10"; ctx.beginPath(); ctx.moveTo(-canvas.width/2, canvas.height/2); ctx.lineTo(-300, canvas.height/2 - 80); ctx.lineTo(300, canvas.height/2 - 80); ctx.lineTo(canvas.width/2, canvas.height/2); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = hudColor; ctx.stroke();
+
+            ctx.style = "#333"; ctx.fillRect(-250, canvas.height/2 - 50, 120, 15);
+            ctx.fillStyle = health > 30 ? "#00ff66" : "#ff3333"; ctx.fillRect(-250, canvas.height/2 - 50, (health / 100) * 120, 15);
+            ctx.fillStyle = "#fff"; ctx.font = "bold 11px Arial"; ctx.fillText("PAJZS: " + health + "%", -240, canvas.height/2 - 38);
+
+            ctx.fillStyle = "#ffcc00"; ctx.font = "bold 13px 'Courier New'"; ctx.fillText("PÉNZ: $" + money, -80, canvas.height/2 - 38);
+            ctx.fillStyle = hudColor; ctx.font = "bold 13px 'Courier New'"; ctx.fillText("PONT: " + score, 120, canvas.height/2 - 48);
+            ctx.fillText("SZINT: " + level, 120, canvas.height/2 - 28);
+            ctx.restore();
+
+            requestAnimationFrame(animate);
+        }
+
+        // KÜLÖN INTELLIGENS GAME OVER ÉS SHOP ABLAK RAJZOLÁSA A CANVASRE
+        function drawGameOverScreen() {
+            ctx.fillStyle = "rgba(0, 0, 5, 0.85)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Keret az ablaknak
+            ctx.strokeStyle = "#ff3355"; ctx.lineWidth = 4;
+            ctx.strokeRect(150, 50, 500, 440);
+            ctx.fillStyle = "#0b0c16"; ctx.fillRect(150, 50, 500, 440);
+
+            ctx.fillStyle = "#ff3355"; ctx.font = "bold 26px 'Courier New'";
+            ctx.fillText("ŰRHAJÓ MEGSEMMISÜLT!", 240, 100);
+
+            ctx.fillStyle = "#ffcc00"; ctx.font = "bold 20px 'Courier New'";
+            ctx.fillText("ZSEBBEN LÉVŐ PÉNZED: $" + money, 250, 140);
+            ctx.fillStyle = "#fff"; ctx.font = "14px 'Courier New'";
+            ctx.fillText("Elért pontszám: " + score, 310, 170);
+
+            ctx.fillStyle = "#00ff66"; ctx.font = "bold 18px 'Courier New'";
+            ctx.fillText("🛒 PILÓTA SHOP (Vásárolj!)", 250, 210);
+
+            // 1. SHOP OPCIÓ: PAJZS REGENERÁCIÓ
+            ctx.fillStyle = (money >= 200) ? "#1a2438" : "#16171d"; ctx.fillRect(200, 230, 400, 45);
+            ctx.strokeStyle = (money >= 200) ? "#00ff66" : "#444"; ctx.lineWidth = 2; ctx.strokeRect(200, 230, 400, 45);
+            ctx.fillStyle = "#fff"; ctx.font = "bold 13px Arial"; ctx.fillText("1. ÉLET / FOLYTATÁS REGENERÁLÁSA", 220, 250);
+            ctx.fillStyle = "#00ff66"; ctx.fillText("Ára: $200", 520, 250);
+
+            // 2. SHOP OPCIÓ: DUPLA PLAZMA
+            ctx.fillStyle = (money >= 400 && !hasDoubleLaser) ? "#1a2438" : "#16171d"; ctx.fillRect(200, 290, 400, 45);
+            ctx.strokeRect(200, 290, 400, 45);
+            ctx.fillStyle = hasDoubleLaser ? "#888" : "#fff";
+            ctx.fillText(hasDoubleLaser ? "2. DUPLA ÁGYÚ BESZERELVE ✓" : "2. DUPLA PLAZMA ÁGYÚ (4 LÉZER)", 220, 310);
+            if (!hasDoubleLaser) { ctx.fillStyle = "#00ff66"; ctx.fillText("Ára: $400", 520, 310); }
+
+            // 3. SHOP OPCIÓ: ZÖLD HANGULAT SKIN
+            ctx.fillStyle = (money >= 600 && !isGreenSkin) ? "#1a2438" : "#16171d"; ctx.fillRect(200, 350, 400, 45);
+            ctx.strokeRect(200, 350, 400, 45);
+            ctx.fillStyle = isGreenSkin ? "#888" : "#fff";
+            ctx.fillText(isGreenSkin ? "3. NEON ZÖLD MOD AKTÍV ✓" : "3. NEON ZÖLD COCKPIT DESIGN", 220, 370);
+            if (!isGreenSkin) { ctx.fillStyle = "#00ff66"; ctx.fillText("Ára: $600", 520, 370); }
+
+            // Újrakezdés gomb alul
+            ctx.fillStyle = "#ff3355"; ctx.fillRect(250, 430, 300, 40);
+            ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Courier New'";
+            ctx.fillText("ÚJ JÁTÉK INDÍTÁSA (ENTER)", 295, 455);
+
+            requestAnimationFrame(drawGameOverScreen);
+        }
+
+        animate();
+    </script>
+
+</body>
+</html>
