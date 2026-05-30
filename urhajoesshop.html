@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fani 3D Űrhajó Szimulátor 🚀</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: 'Courier New', monospace;
+            background-color: #020208;
+            margin: 0;
+            padding-top: 10px;
+            color: #fff;
+            user-select: none;
+            overflow: hidden;
+        }
+        #gameCanvas {
+            background-color: #000005;
+            border: 3px solid #00d2ff;
+            border-radius: 10px;
+            display: block;
+            margin: 0 auto;
+            box-shadow: 0px 0px 25px rgba(0, 210, 255, 0.4);
+            max-width: 100%;
+            touch-action: none;
+        }
+        h1 { color: #00d2ff; margin-bottom: 5px; text-shadow: 0 0 10px rgba(0,210,255,0.5); font-size: 20px; }
+        p { color: #888; font-size: 12px; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <h1>Fani 3D Űrhajó Szimulátor 🚀</h1>
+    <p>Gép: Nyilak + Szóköz | Teló: Érintsd a Bal/Jobb oldalt a kormányzáshoz (Automata lövés)</p>
+    <canvas id="gameCanvas" width="800" height="550"></canvas>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // Játék változók (Az eredeti alapok + a pénz)
+        let score = 0;
+        let money = 0; 
+        let health = 100;
+        let isGameOver = false;
+
+        // Bolt fejlesztések állapota
+        let hasDoubleLaser = false;
+
+        // Űrhajó dőlése és pozíciója
+        let shipX = 0;
+        let shipY = 0;
+        let tilt = 0;
+
+        // Csillagok a háttérben
+        let stars = [];
+        for(let i=0; i<60; i++) {
+            stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: Math.random() * 2 + 1 });
+        }
+
+        // Meteorok
+        let objects = [];
+        let spawnTimer = 0;
+
+        // Lézerek
+        let lasers = [];
+        let shootTimer = 0;
+
+        // Irányítás mentése
+        let keys = {};
+        document.addEventListener("keydown", (e) => {
+            keys[e.code] = true;
+            if (e.code === "Space" && !isGameOver) {
+                shootLaser();
+            }
+            // Gépnél gombok a bolthoz a Game Over képernyőn
+            if (isGameOver) {
+                if (e.code === "Digit1" || e.code === "Numpad1") buyItem('shield', 200);
+                if (e.code === "Digit2" || e.code === "Numpad2") buyItem('laser', 400);
+                if (e.code === "Enter") resetGameTotal();
+            }
+        });
+        document.addEventListener("keyup", (e) => keys[e.code] = false);
+
+        // Telefonos érintés kezelése (Kormányzás + Bolt)
+        let touchX = null;
+        canvas.addEventListener("touchstart", (e) => {
+            const rect = canvas.getBoundingClientRect();
+            let clickX = ((e.touches[0].clientX - rect.left) / rect.width) * canvas.width;
+            let clickY = ((e.touches[0].clientY - rect.top) / rect.height) * canvas.height;
+
+            // Ha Game Over van, a bolt gombjait lehet nyomni a képernyőn
+            if (isGameOver) {
+                // 1. gomb: Pajzs újra (Folytatás)
+                if (clickX >= 200 && clickX <= 600 && clickY >= 240 && clickY <= 290) {
+                    buyItem('shield', 200);
+                }
+                // 2. gomb: Dupla lézer beszerelés
+                else if (clickX >= 200 && clickX <= 600 && clickY >= 310 && clickY <= 360) {
+                    buyItem('laser', 400);
+                }
+                // Új játék gomb legalul
+                else if (clickX >= 250 && clickX <= 550 && clickY >= 420 && clickY <= 465) {
+                    resetGameTotal();
+                }
+                return;
+            }
+
+            touchX = e.touches[0].clientX;
+        });
+        canvas.addEventListener("touchmove", (e) => {
+            touchX = e.touches[0].clientX;
+        });
+        canvas.addEventListener("touchend", () => { touchX = null; });
+
+        function resetGameTotal() {
+            score = 0; money = 0; health = 100; isGameOver = false;
+            shipX = 0; shipY = 0; tilt = 0; objects = []; lasers = [];
+            hasDoubleLaser = false;
+            update();
+        }
+
+        function shootLaser() {
+            if (hasDoubleLaser) {
+                // Szuper dupla sugár (4 lézer csík)
+                lasers.push({ x: shipX - 0.15, y: shipY, z: 0.1 });
+                lasers.push({ x: shipX - 0.05, y: shipY, z: 0.1 });
+                lasers.push({ x: shipX + 0.05, y: shipY, z: 0.1 });
+                lasers.push({ x: shipX + 0.15, y: shipY, z: 0.1 });
+            } else {
+                // Eredeti alap lézer középről
+                lasers.push({ x: shipX, y: shipY, z: 0.1 });
+            }
+        }
+
+        function spawnObject() {
+            objects.push({
+                x: Math.random() * 2 - 1, 
+                y: Math.random() * 2 - 1,
+                z: 1, 
+                size: Math.random() * 30 + 20,
+                color: "#00d2ff" // Tiszta eredeti kék meteor
+            });
+        }
+
+        // BOLTI VÁSÁRLÁS FUNKCIÓ
+        function buyItem(item, price) {
+            if (money >= price) {
+                money -= price;
+                if (item === 'shield') {
+                    health = 100;
+                    isGameOver = false; // Folytatja a játékot azonnal!
+                    objects = []; lasers = [];
+                    update();
+                }
+                else if (item === 'laser') {
+                    hasDoubleLaser = true;
+                }
+            }
+        }
+
+        function update() {
+            if (isGameOver) {
+                drawShopScreen();
+                return;
+            }
+
+            // Csillagok mozgatása
+            stars.forEach(star => {
+                star.y += 2;
+                if (star.y > canvas.height) star.y = 0;
+            });
+
+            // Billentyűzet irányítás
+            let moveSpeed = 0.04;
+            if (keys["ArrowLeft"]) { shipX -= moveSpeed; tilt += (-0.15 - tilt) * 0.2; }
+            else if (keys["ArrowRight"]) { shipX += moveSpeed; tilt += (0.15 - tilt) * 0.2; }
+            else if (touchX !== null) {
+                const rect = canvas.getBoundingClientRect();
+                let relativeX = touchX - rect.left;
+                if (relativeX < rect.width / 2) {
+                    shipX -= moveSpeed; tilt += (-0.15 - tilt) * 0.2;
+                } else {
+                    shipX += moveSpeed; tilt += (0.15 - tilt) * 0.2;
+                }
+            } else {
+                tilt += (0 - tilt) * 0.1; 
+            }
+
+            if (keys["ArrowUp"]) shipY -= moveSpeed;
+            if (keys["ArrowDown"]) shipY += moveSpeed;
+
+            if (shipX < -0.9) shipX = -0.9; if (shipX > 0.9) shipX = 0.9;
+            if (shipY < -0.7) shipY = -0.7; if (shipY > 0.7) shipY = 0.7;
+
+            // Automata lövés telefonon időközönként
+            shootTimer++;
+            if (touchX !== null && shootTimer % 12 === 0) {
+                shootLaser();
+            }
+
+            // Objektumok frissítése
+            spawnTimer++;
+            if (spawnTimer % 20 === 0) { spawnObject(); }
+
+            lasers.forEach((laser, lIdx) => {
+                laser.z += 0.05;
+                if (laser.z > 1) lasers.splice(lIdx, 1);
+            });
+
+            objects.forEach((obj, oIdx) => {
+                obj.z -= 0.015; 
+
+                // Találat ellenőrzése a lézerekkel
+                lasers.forEach((laser, lIdx) => {
+                    if (Math.abs(laser.x - obj.x) < 0.2 && Math.abs(laser.y - obj.y) < 0.2 && Math.abs(laser.z - obj.z) < 0.1) {
+                        objects.splice(oIdx, 1);
+                        lasers.splice(lIdx, 1);
+                        score += 50;
+                        money += 50; // Pontosan $50 jár minden meteorért!
+                    }
+                });
+
+                // Ha az objektum eléri az űrhajót
+                if (obj.z <= 0.05) {
+                    if (Math.abs(obj.x - shipX) < 0.35 && Math.abs(obj.y - shipY) < 0.35) {
+                        health -= 25; 
+                        if (health <= 0) isGameOver = true;
+                    }
+                    objects.splice(oIdx, 1);
+                }
+            });
+
+            // --- RAJZOLÁS ---
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Csillagos háttér
+            ctx.fillStyle = "#fff";
+            stars.forEach(star => ctx.fillRect(star.x, star.y, star.size, star.size));
+
+            // 3D Objektumok kirajzolása
+            objects.forEach(obj => {
+                let screenX = (canvas.width / 2) + (obj.x - shipX) * (1 / obj.z) * 200;
+                let screenY = (canvas.height / 2) + (obj.y - shipY) * (1 / obj.z) * 150;
+                let currentSize = obj.size * (1 / obj.z) * 0.5;
+
+                if (obj.z > 0.05 && currentSize > 0) {
+                    ctx.fillStyle = obj.color;
+                    ctx.shadowBlur = 15; ctx.shadowColor = "#00d2ff";
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, currentSize / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowBlur = 0; 
+                }
+            });
+
+            // Lézer sugarak kirajzolása
+            ctx.strokeStyle = hasDoubleLaser ? "#ffcc00" : "#ff0055"; ctx.lineWidth = 4;
+            lasers.forEach(laser => {
+                let sX = (canvas.width / 2) + (laser.x - shipX) * (1 / laser.z) * 200;
+                let sY = (canvas.height / 2) + (laser.y - shipY) * (1 / laser.z) * 150;
+                ctx.beginPath(); ctx.moveTo(sX, sY); ctx.lineTo(sX, sY - 15); ctx.stroke();
+            });
+
+            // --- ERDETI PILÓTAFÜLKE (COCKPIT) GRAFIKA ---
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(tilt); 
+
+            // Szélvédő keret
+            ctx.strokeStyle = "#12131a"; ctx.lineWidth = 25;
+            ctx.strokeRect(-canvas.width/2 + 20, -canvas.height/2 + 20, canvas.width - 40, canvas.height - 100);
+
+            // Célkereszt középen
+            ctx.strokeStyle = "rgba(0, 210, 255, 0.3)"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(-40, 0); ctx.lineTo(-15, 0); ctx.moveTo(15, 0); ctx.lineTo(40, 0); stroke();
+            ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(0, -15); ctx.moveTo(0, 15); ctx.lineTo(0, 40); ctx.stroke();
+
+            // Alsó műszerfal panel
+            ctx.fillStyle = "#0a0b10";
+            ctx.beginPath();
+            ctx.moveTo(-canvas.width/2, canvas.height/2);
+            ctx.lineTo(-300, canvas.height/2 - 80);
+            ctx.lineTo(300, canvas.height/2 - 80);
+            ctx.lineTo(canvas.width/2, canvas.height/2);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = "#00d2ff"; ctx.lineWidth = 2; ctx.stroke();
+
+            // Életerő csík
+            ctx.fillStyle = "#333"; ctx.fillRect(-250, canvas.height/2 - 50, 120, 15);
+            ctx.fillStyle = health > 30 ? "#00ff66" : "#ff3333";
+            ctx.fillRect(-250, canvas.height/2 - 50, (health / 100) * 120, 15);
+            ctx.fillStyle = "#fff"; ctx.font = "bold 11px Arial"; ctx.fillText("PAJZS: " + health + "%", -240, canvas.height/2 - 38);
+
+            // Megjelenített adatok az eredeti elrendezésben + a PÉNZ
+            ctx.fillStyle = "#ffcc00"; ctx.font = "bold 13px 'Courier New'";
+            ctx.fillText("PÉNZ: $" + money, -60, canvas.height/2 - 38);
+
+            ctx.fillStyle = "#00d2ff"; ctx.font = "bold 13px 'Courier New'";
+            ctx.fillText("PONT: " + score, 130, canvas.height/2 - 38);
+
+            ctx.restore();
+
+            requestAnimationFrame(update);
+        }
+
+        // --- A KÉRT BEÉPÍTETT SHOP PANAL (AMIKOR MEGHALSZ, EZ JELENIK MEG) ---
+        function drawShopScreen() {
+            ctx.fillStyle = "rgba(0, 0, 5, 0.85)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Shop ablak kerete
+            ctx.strokeStyle = "#00d2ff"; ctx.lineWidth = 3;
+            ctx.strokeRect(160, 60, 480, 420);
+            ctx.fillStyle = "#060810"; ctx.fillRect(160, 60, 480, 420);
+
+            ctx.fillStyle = "#ff3355"; ctx.font = "bold 24px 'Courier New'";
+            ctx.fillText("ŰRHAJÓ MEGSEMMISÜLT! 💥", 235, 110);
+
+            ctx.fillStyle = "#ffcc00"; ctx.font = "bold 18px 'Courier New'";
+            ctx.fillText("PILÓTA PÉNZTÁRCA: $" + money, 265, 155);
+            ctx.fillStyle = "#fff"; ctx.font = "14px 'Courier New'";
+            ctx.fillText("Pontszámod: " + score, 335, 185);
+
+            // 1. SHOP GOMB: FOLYATATÁS / PAJZS REGENERÁLÁS
+            ctx.fillStyle = (money >= 200) ? "#141f32" : "#111318"; ctx.fillRect(200, 240, 400, 50);
+            ctx.strokeStyle = (money >= 200) ? "#00ff66" : "#444"; ctx.lineWidth = 2; ctx.strokeRect(200, 240, 400, 50);
+            ctx.fillStyle = "#fff"; ctx.font = "bold 13px Arial"; ctx.fillText("1. JÁTÉK FOLYTATÁSA (100% PAJZS)", 220, 270);
+            ctx.fillStyle = "#00ff66"; ctx.fillText("$200", 550, 270);
+
+            // 2. SHOP GOMB: DUPLA PLAZMA LÉZER
+            ctx.fillStyle = (money >= 400 && !hasDoubleLaser) ? "#141f32" : "#111318"; ctx.fillRect(200, 310, 400, 50);
+            ctx.strokeStyle = (hasDoubleLaser) ? "#ffcc00" : ((money >= 400) ? "#00d2ff" : "#444"); ctx.strokeRect(200, 310, 400, 50);
+            ctx.fillStyle = hasDoubleLaser ? "#888" : "#fff";
+            ctx.fillText(hasDoubleLaser ? "2. SZEBB LÉZER MEGVÉVE ✓" : "2. DUPLA ÁGYÚ BESZERELÉSE", 220, 340);
+            if (!hasDoubleLaser) { ctx.fillStyle = "#00ff66"; ctx.fillText("$400", 550, 340); }
+
+            // ÚJRAINDÍTÁS GOMB
+            ctx.fillStyle = "#ff3355"; ctx.fillRect(250, 420, 300, 45);
+            ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Courier New'";
+            ctx.fillText("ÚJ JÁTÉK ELÖLRŐL (ENTER)", 285, 447);
+
+            requestAnimationFrame(drawShopScreen);
+        }
+
+        // MOST MÁR AZONNAL ELINDÍTJA A JÁTÉKOT, NINCS FEKETE KÉPERNYŐ!
+        update();
+    </script>
+
+</body>
+</html>
