@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Medal of Honor: Budapest Airborne</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            color: #d4c5a9;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+            user-select: none;
+            touch-action: none;
+        }
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            height: 540px;
+            border: 4px solid #3a3f35;
+            background-color: #000;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+        /* ELIGAZÍTÓ KÉPERNYŐ (HADITERV) */
+        #briefing-screen {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(#2c3026, #141711);
+            padding: 15px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 10;
+            overflow-y: auto;
+        }
+        .briefing-header {
+            text-align: center;
+            border-bottom: 2px dashed #6b775f;
+            padding-bottom: 5px;
+            color: #fff;
+        }
+        .briefing-header h2 { margin: 5px 0; font-size: 18px; }
+        .briefing-header p { margin: 5px 0; font-size: 11px; }
+        
+        .briefing-main {
+            display: flex;
+            flex-direction: row;
+            flex: 1;
+            margin: 10px 0;
+            gap: 15px;
+        }
+        @media (max-width: 600px) {
+            .briefing-main { flex-direction: column; }
+            #game-container { height: auto; }
+        }
+        .briefing-text {
+            flex: 1;
+            background: rgba(0,0,0,0.4);
+            border: 1px solid #4a5341;
+            padding: 10px;
+            overflow-y: auto;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #c8d1be;
+            max-height: 150px;
+        }
+        .briefing-sidebar {
+            width: 100%;
+            max-width: 260px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .mini-map {
+            height: 100px;
+            background: #222;
+            border: 2px solid #555;
+            position: relative;
+        }
+        .setup-group {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid #4a5341;
+            padding: 6px;
+        }
+        .setup-title {
+            font-size: 11px;
+            font-weight: bold;
+            margin-bottom: 3px;
+            color: #fff;
+        }
+        select {
+            width: 100%;
+            background: #2a3024;
+            color: #fff;
+            border: 1px solid #5a664f;
+            padding: 4px;
+            font-family: inherit;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        #start-btn {
+            background: #4e5a43;
+            color: #fff;
+            border: 2px solid #6b775f;
+            padding: 10px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        /* JÁTÉKTERÜLET */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background: #111;
+        }
+        #hud {
+            width: 100%;
+            max-width: 800px;
+            background: rgba(20, 25, 20, 0.95);
+            border: 4px solid #3a4233;
+            border-top: none;
+            display: none;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 15px;
+            box-sizing: border-box;
+            font-weight: bold;
+            color: #aec29c;
+            font-size: 12px;
+        }
+        .hud-val { color: #fff; font-size: 14px; }
+        
+        /* MOBIL GOMBOK (Vezérlőpult) */
+        #mobile-controls {
+            display: none;
+            width: 100%;
+            max-width: 800px;
+            background: #151813;
+            padding: 10px 0;
+            border: 4px solid #3a4233;
+            border-top: none;
+            justify-content: space-around;
+            box-sizing: border-box;
+        }
+        .btn-panel { display: flex; gap: 10px; }
+        .m-btn {
+            background: #333a2e;
+            border: 2px solid #525e4a;
+            color: white;
+            padding: 15px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            border-radius: 8px;
+            touch-action: manipulation;
+        }
+        .m-btn:active { background: #525e4a; }
+        #m-fire { background: #8b2626; border-color: #b23b3b; }
+        #m-fire:active { background: #b23b3b; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <!-- HADITERV / ELIGAZÍTÓ KÉPERNYŐ -->
+    <div id="briefing-screen">
+        <div class="briefing-header">
+            <h2>SZIGORÚAN TITKOS: „BUDAPEST AIRBORNE” HADITERV</h2>
+            <p>SZÖVETSÉGES FŐHADISZÁLLÁS — GÉPEN ÉS MOBILON IS</p>
+        </div>
+        
+        <div class="briefing-main">
+            <div class="briefing-text">
+                <strong>HADMŰVELETI ELŐÍRÁS:</strong><br><br>
+                Ugorj be a romos Budapest felett! <br><br>
+                <strong>Irányítás gépen:</strong> WASD / Nyilak a zuhanáshoz, Egér a célzáshoz és kattintás a lövéshez. Fegyverek: 1-2-3, Gránát: G.<br><br>
+                <strong>Irányítás mobilon:</strong> Használd az alsó gombokat az ernyőhöz és a harchoz! Célzáshoz húzd az ujjad a játékképernyőn!
+            </div>
+            
+            <div class="briefing-sidebar">
+                <div class="mini-map">
+                    <canvas id="miniMapCanvas" width="260" height="100"></canvas>
+                </div>
+                
+                <div class="setup-group">
+                    <select id="mission-select">
+                        <option value="1">1. Szint: A szétlőtt Lánchíd</option>
+                        <option value="2">2. Szint: Budai bérházak</option>
+                        <option value="3">3. Szint: A Parlament ostroma</option>
+                    </select>
+                </div>
+
+                <div class="setup-group">
+                    <select id="difficulty-select">
+                        <option value="easy">EASY (Könnyű)</option>
+                        <option value="medium" selected>MEDIUM (Normál)</option>
+                        <option value="hard">HARD (Veterán)</option>
+                    </select>
+                </div>
+
+                <div class="setup-group">
+                    <select id="weapon-select">
+                        <option value="Thompson">Thompson géppisztoly</option>
+                        <option value="M1Garand">M1 Garand puska</option>
+                        <option value="Danuvia">Danuvia 39M</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <button id="start-btn">TOVÁBB A REPLŐGÉPHEZ (UGRÁS)</button>
+    </div>
+
+    <!-- JÁTÉK CANVASA -->
+    <canvas id="gameCanvas" width="800" height="540"></canvas>
+</div>
+
+<!-- AIRBORNE HUD -->
+<div id="hud">
+    <div>ÉLETERŐ: <span id="hud-hp" class="hud-val">100</span>%</div>
+    <div>FEGYVER: <span id="hud-wpn" class="hud-val">-</span></div>
+    <div>LŐSZER: <span id="hud-ammo" class="hud-val">-</span></div>
+    <div>GRÁNÁT: <span id="hud-grenades" class="hud-val">3</span></div>
+</div>
+
+<!-- MOBIL VEZÉRLŐPULT -->
+<div id="mobile-controls">
+    <!-- Ernyő gombok -->
+    <div class="btn-panel" id="airborne-btns">
+        <button class="m-btn" id="m-left">BAL</button>
+        <div style="display:flex; flex-direction:column; gap:5px;">
+            <button class="m-btn" style="padding:8px 15px;" id="m-up">FEL</button>
+            <button class="m-btn" style="padding:8px 15px;" id="m-down">LE</button>
+        </div>
+        <button class="m-btn" id="m-right">JOBB</button>
+    </div>
+    
+    <!-- Harci gombok -->
+    <div class="btn-panel" id="ground-btns" style="display: none;">
+        <button class="m-btn" id="m-swap">FEGYVER</button>
+        <button class="m-btn" id="m-grenade">GRÁNÁT</button>
+        <button class="m-btn" id="m-fire">TŰZ</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const miniCanvas = document.getElementById('miniMapCanvas');
+const mCtx = miniCanvas.getContext('2d');
+
+let gameState = "BRIEFING"; 
+let diff = "medium";
+let currentMission = 1;
+let isMobile = false;
+
+// Mobil eszköz észlelés
+if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+    isMobile = true;
+}
+
+let player = {
+    x: 400, y: 150,
+    hp: 100, maxHp: 100,
+    currentWpnIdx: 0,
+    grenades: 3,
+    phase: "AIRBORNE", 
+    altitude: 1000, 
+    targetX: 400
+};
+
+let weapons = [
+    { name: "Thompson", ammo: 90, maxAmmo: 90, dmg: 25, fireRate: 150, lastShot: 0 },
+    { name: "M1 Garand", ammo: 32, maxAmmo: 32, dmg: 60, fireRate: 400, lastShot: 0 },
+    { name: "Danuvia 39M", ammo: 120, maxAmmo: 120, dmg: 20, fireRate: 120, lastShot: 0 }
+];
+
+let enemies = [];
+let particles = [];
+let dropZone = { x: 400, y: 250, radius: 70 };
+
+// GÉPI IRÁNYÍTÁS (Billentyűzet + Egér)
+let keys = {};
+window.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if (player.phase === "GROUND") {
+        if (e.key === "1") { player.currentWpnIdx = 0; updateHUD(); }
+        if (e.key === "2") { player.currentWpnIdx = 1; updateHUD(); }
+        if (e.key === "3") { player.currentWpnIdx = 2; updateHUD(); }
+        if (e.key.toLowerCase() === "g") { throwGrenade(); }
+    }
+});
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+canvas.addEventListener('mousemove', e => {
+    if(!isMobile) {
+        const rect = canvas.getBoundingClientRect();
+        player.targetX = (e.clientX - rect.left) * (canvas.width / rect.width);
+    }
+});
+canvas.addEventListener('mousedown', () => {
+    if (player.phase === "GROUND" && !isMobile) shootWeapon();
+});
+
+// MOBIL ÉRINTŐ IRÁNYÍTÁS ÉS SWIPE CÉLZÁS
+canvas.addEventListener('touchmove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    player.targetX = (touch.clientX - rect.left) * (canvas.width / rect.width);
+    e.preventDefault();
+}, { passive: false });
+
+// Mobil gombok eseményei
+const setupMobileBtn = (id, keyName) => {
+    const btn = document.getElementById(id);
+    btn.addEventListener('touchstart', (e) => { keys[keyName] = true; e.preventDefault(); });
+    btn.addEventListener('touchend', (e) => { keys[keyName] = false; e.preventDefault(); });
+};
+setupMobileBtn('m-left', 'ArrowLeft');
+setupMobileBtn('m-right', 'ArrowRight');
+setupMobileBtn('m-up', 'ArrowUp');
+setupMobileBtn('m-down', 'ArrowDown');
+
+document.getElementById('m-fire').addEventListener('touchstart', (e) => { if(player.phase === "GROUND") shootWeapon(); e.preventDefault(); });
+document.getElementById('m-grenade').addEventListener('touchstart', (e) => { throwGrenade(); e.preventDefault(); });
+document.getElementById('m-swap').addEventListener('touchstart', (e) => {
+    player.currentWpnIdx = (player.currentWpnIdx + 1) % weapons.length;
+    updateHUD();
+    e.preventDefault();
+});
+
+function drawMiniMap() {
+    mCtx.fillStyle = '#1e221a'; mCtx.fillRect(0,0,miniCanvas.width,miniCanvas.height);
+    mCtx.strokeStyle = '#2d3b4e'; mCtx.lineWidth = 4;
+    mCtx.beginPath(); mCtx.moveTo(130, 0); mCtx.lineTo(130, 100); mCtx.stroke();
+    mCtx.fillStyle = '#ff3333'; mCtx.beginPath(); mCtx.arc(130, 30, 5, 0, Math.PI*2); mCtx.fill();
+}
+
+document.getElementById('mission-select').addEventListener('change', (e) => currentMission = parseInt(e.target.value));
+
+document.getElementById('start-btn').addEventListener('click', () => {
+    diff = document.getElementById('difficulty-select').value;
+    const selectedWpn = document.getElementById('weapon-select').value;
+    
+    if (selectedWpn === "Thompson") player.currentWpnIdx = 0;
+    if (selectedWpn === "M1Garand") player.currentWpnIdx = 1;
+    if (selectedWpn === "Danuvia") player.currentWpnIdx = 2;
+
+    if (diff === "easy") { player.hp = 150; player.maxHp = 150; }
+    if (diff === "medium") { player.hp = 100; player.maxHp = 100; }
+    if (diff === "hard") { player.hp = 70; player.maxHp = 70; }
+
+    document.getElementById('briefing-screen').style.display = 'none';
+    document.getElementById('hud').style.display = 'flex';
+    if(isMobile) document.getElementById('mobile-controls').style.display = 'flex';
+    
+    startAirbornePhase();
+});
+
+function startAirbornePhase() {
+    gameState = "PLAYING";
+    player.phase = "AIRBORNE";
+    player.altitude = 1000;
+    player.x = 400; player.y = 150;
+    enemies = [];
+    dropZone.x = 250 + Math.random() * 300;
+    dropZone.y = 200 + Math.random() * 150;
+    updateHUD();
+    gameLoop();
+}
+
+function updateHUD() {
+    document.getElementById('hud-hp').innerText = Math.max(0, Math.round(player.hp));
+    document.getElementById('hud-wpn').innerText = weapons[player.currentWpnIdx].name;
+    document.getElementById('hud-ammo').innerText = weapons[player.currentWpnIdx].ammo;
+    document.getElementById('hud-grenades').innerText = player.grenades;
+}
+
+function throwGrenade() {
+    if (player.grenades > 0) {
+        player.grenades--; updateHUD();
+        setTimeout(() => {
+            createExplosion(400 + (Math.random()*160 - 80), 300, '#ff5500', 30);
+            enemies.forEach(e => e.hp -= 80);
+        }, 600);
+    }
+}
+
+function shootWeapon() {
+    let wpn = weapons[player.currentWpnIdx];
+    let now = Date.now();
+    if (now - wpn.lastShot > wpn.fireRate && wpn.ammo > 0) {
+        wpn.ammo--; wpn.lastShot = now; updateHUD();
+        createExplosion(player.targetX, 450, '#ffcc00', 8);
+        enemies.forEach(e => {
+            if (player.targetX >= e.x && player.targetX <= e.x + e.w) {
+                e.hp -= wpn.dmg;
+                createExplosion(e.x + e.w/2, e.y + e.h/2, '#ff0000', 6);
+            }
+        });
+    }
+}
+
+function createExplosion(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+        particles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6,
+            radius: Math.random() * 3 + 1, color: color, life: 25
+        });
+    }
+}
+
+function gameLoop() {
+    if (gameState !== "PLAYING") return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    particles.forEach((p, idx) => {
+        p.x += p.vx; p.y += p.vy; p.life--;
+        if (p.life <= 0) particles.splice(idx, 1);
+    });
+
+    if (player.phase === "AIRBORNE") {
+        player.altitude -= 2;
+
+        if (keys['ArrowLeft'] || keys['a']) player.x -= 3;
+        if (keys['ArrowRight'] || keys['d']) player.x += 3;
+        if (keys['ArrowUp'] || keys['w']) player.y -= 3;
+        if (keys['ArrowDown'] || keys['s']) player.y += 3;
+
+        ctx.fillStyle = '#22251e'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = 'rgba(50, 200, 50, 0.25)';
+        ctx.beginPath(); ctx.arc(dropZone.x, dropZone.y, dropZone.radius, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#32c832'; ctx.stroke();
+
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(player.x, player.y, 15, Math.PI, 0); ctx.fill();
+        ctx.fillStyle = '#6b775f'; ctx.fillRect(player.x - 3, player.y + 10, 6, 10);
+
+        ctx.fillStyle = '#fff'; ctx.font = '16px Courier New';
+        ctx.fillText(`MAGASSÁG: ${Math.round(player.altitude)} m`, 20, 40);
+
+        if (player.altitude <= 0) {
+            player.phase = "GROUND";
+            if(isMobile) {
+                document.getElementById('airborne-btns').style.display = 'none';
+                document.getElementById('ground-btns').style.display = 'flex';
+            }
+            let dist = Math.hypot(player.x - dropZone.x, player.y - dropZone.y);
+            if (dist <= dropZone.radius) {
+                weapons.forEach(w => w.ammo = w.maxAmmo); player.grenades = 5;
+                alert("SIKERES LANDOLÁS A ZÖLD FÜSTNÉL!");
+            } else {
+                player.hp -= (diff === "hard" ? 30 : 15);
+                alert("ROSSZ LANDOLÁS! ELLENSÉGES TÜZ!");
+            }
+            updateHUD();
+        }
+    } 
+    else if (player.phase === "GROUND") {
+        if (enemies.length < 3 && Math.random() < 0.015) {
+            enemies.push({ x: 150 + Math.random() * 500, y: 260, w: 35, h: 65, hp: 50, lastShot: 0 });
+        }
+
+        ctx.fillStyle = '#1a1c17'; ctx.fillRect(0, 0, 800, 220);
+        ctx.fillStyle = '#2d251e'; ctx.fillRect(0, 220, 800, 320);
+        ctx.fillStyle = '#4a443f'; ctx.fillRect(200, 310, 400, 50);
+
+        enemies.forEach((e, idx) => {
+            if (e.hp <= 0) { enemies.splice(idx, 1); return; }
+            ctx.fillStyle = '#4b5343'; ctx.fillRect(e.x, e.y, e.w, e.h);
+            ctx.fillStyle = '#ff0000'; ctx.fillRect(e.x, e.y - 8, e.w, 4);
+
+            let now = Date.now();
+            if (now - e.lastShot > 1500) {
+                e.lastShot = now;
+                player.hp -= (diff === "hard" ? 20 : 10); updateHUD();
+                if (player.hp <= 0) { alert("MEGHALTÁL!"); location.reload(); }
+            }
+        });
+
+        // FEGYVER ÉS CÉLKERESZT
+        ctx.fillStyle = '#333'; ctx.fillRect(player.targetX - 10, 450, 20, 90);
+        ctx.strokeStyle = '#00ff00'; ctx.beginPath(); ctx.arc(player.targetX, 430, 8, 0, Math.PI*2); ctx.stroke();
+    }
+
+    particles.forEach(p => { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2); ctx.fill(); });
+    requestAnimationFrame(gameLoop);
+}
+
+drawMiniMap();
+</script>
+</body>
+</html>
