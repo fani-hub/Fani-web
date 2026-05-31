@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fani's Web</title>
+    <style>
+        body {
+            margin: 0; padding: 0; background-color: #030308;
+            background-image: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.8)), url('https://images.unsplash.com/photo-1639762681485-074b7f938ba0?q=80&w=1920');
+            background-size: cover; background-position: center; background-attachment: fixed;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            height: 100vh; display: flex; align-items: center; justify-content: center; color: white; overflow: hidden;
+        }
+
+        /* --- FELSŐ SÁV --- */
+        .top-bar { position: absolute; top: 0; left: 0; width: 100%; height: 70px; display: flex; align-items: center; padding-left: 25px; box-sizing: border-box; z-index: 100; }
+        .menu-btn { background: none; border: none; color: white; font-size: 26px; cursor: pointer; display: flex; align-items: center; gap: 15px; font-weight: bold; }
+        .menu-btn span { font-size: 18px; }
+
+        /* --- BEÚSZÓ OLDALMENÜ --- */
+        .sidebar { position: fixed; top: 0; left: -280px; width: 280px; height: 100%; background: rgba(10,10,15,0.95); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border-right: 1px solid rgba(255,255,255,0.08); box-shadow: 5px 0 25px rgba(0,0,0,0.6); transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index: 90; padding-top: 90px; display: flex; flex-direction: column; box-sizing: border-box; }
+        .sidebar.open { left: 0; }
+        .menu-link { padding: 16px 25px; color: #e2e8f0; text-decoration: none; font-size: 16px; display: flex; align-items: center; gap: 15px; transition: all 0.2s ease; cursor: pointer; }
+        .menu-link:hover { background: rgba(255,255,255,0.05); color: #ff9900; }
+
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; z-index: 80; }
+        .overlay.show { display: block; }
+
+        /* --- KÖZÉPSŐ DINAMIKUS TARTALOM --- */
+        .main-container { width: 100%; max-width: 650px; padding: 20px; box-sizing: border-box; z-index: 10; display: flex; justify-content: center; }
+        
+        /* Főoldali nagy felirat */
+        .home-content { text-align: center; animation: fadeIn 0.4s ease; }
+        .home-content .logo-icon { font-size: 50px; color: #ff9900; filter: drop-shadow(0 0 12px rgba(255,153,0,0.6)); margin-bottom: 5px; }
+        .home-content h1 { font-size: 64px; margin: 0; font-weight: 700; letter-spacing: -1px; }
+        .home-content .subtitle { font-size: 18px; color: #aaa; margin-top: 10px; }
+
+        /* Belső ablak panelek */
+        .sub-page { display: none; width: 100%; background: rgba(13, 13, 20, 0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-radius: 16px; padding: 25px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 20px 40px rgba(0,0,0,0.5); animation: fadeIn 0.3s ease; max-height: 75vh; overflow-y: auto; }
+        .page-title { font-size: 24px; font-weight: bold; display: flex; align-items: center; gap: 12px; margin-bottom: 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 12px; }
+
+        /* --- KÁRTYA STÍLUSOK --- */
+        .product-card {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            text-decoration: none;
+            color: white;
+            transition: all 0.2s ease;
+        }
+        .product-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: #ff9900;
+            transform: translateY(-2px);
+        }
+        
+        .product-img {
+            width: 90px;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .product-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+        .product-name { font-size: 16px; font-weight: bold; color: #38bdf8; transition: color 0.2s; }
+        .product-card:hover .product-name { color: #ff9900; }
+        .product-desc { font-size: 13px; color: #aaa; line-height: 1.4; }
+        .product-price { font-size: 14px; color: #4ade80; font-weight: bold; margin-top: 2px; }
+
+        /* --- FIX JOBB OLDALI HUD PANEL --- */
+        .hud-panel { position: absolute; top: 40px; right: 40px; background: rgba(10, 13, 18, 0.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 20px; width: 260px; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4); z-index: 100; }
+        .hud-header { display: flex; align-items: center; gap: 8px; color: #00d2ff; font-weight: bold; font-size: 16px; margin-bottom: 15px; }
+        .hud-header span { color: #ff9900; }
+        .hud-divider { height: 1px; background: rgba(255, 255, 255, 0.15); margin: 12px 0; }
+        
+        .hud-item-btn { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-size: 13px; color: #e2e8f0; padding: 8px; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; }
+        .hud-item-btn:hover { background: rgba(255, 255, 255, 0.08); color: #ff9900; transform: translateX(3px); }
+        .hud-item-btn:last-child { margin-bottom: 0; }
+        .hud-icon { font-size: 14px; width: 18px; text-align: center; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Felső sáv menügombbal -->
+    <div class="top-bar">
+        <button class="menu-btn" onclick="toggleMenu()">☰ <span>Fani's Web</span></button>
+    </div>
+
+    <!-- Oldalmenü linkek -->
+    <div id="sidebar" class="sidebar">
+        <div class="menu-link" onclick="showPage('home')">🏠 Főoldal</div>
+        <div class="menu-link" onclick="showPage('games')">🎮 Saját Játékaim</div>
+        <div class="menu-link" onclick="showPage('tech')">💻 Tech Cuccok</div>
+        <div class="menu-link" onclick="showPage('lego')">🧱 LEGO & Makettek</div>
+    </div>
+    <div id="overlay" class="overlay" onclick="toggleMenu()"></div>
+
+
+    <!-- KÖZÉPSŐ TARTALOMTERÜLET -->
+    <div class="main-container">
+        
+        <!-- 1. KEZDŐLAP -->
+        <div id="page-home" class="home-content">
+            <div class="logo-icon">⚡</div>
+            <h1>Fani's Web</h1>
+            <div class="subtitle">Saját Játékok • Tech • LEGO Makettek</div>
+        </div>
+
+        <!-- 2. SAJÁT JÁTÉKOK FÜL -->
+        <div id="page-games" class="sub-page">
+            <div class="page-title">🎮 Az Összes Saját Készítésű Játékom</div>
+            
+            <!-- FANI 3D COCKPIT SZIMULÁTOR JÁTÉK -->
+            <a href="urhajos2.html" class="product-card">
+                <img src="https://via.placeholder.com/90" alt="Űrhajós játék" class="product-img">
+                <div class="product-info">
+                    <div class="product-name">Fani 3D Cockpit Szimulátor</div>
+                    <div class="product-desc">A legújabb űrhajós játék zöld célkereszttel és 3 szinttel. Gyűjts pénzt a meteorokból és élvezd a pilótafülke nézetet!</div>
+                    <div class="product-price">Játék indítása ➔</div>
+                </div>
+            </a>
+
+            <!-- PILÓTA BOLT / ŰRHAJÓSHOP -->
+            <a href="urhajoesshop.html" class="product-card">
+                <img src="https://via.placeholder.com/90" alt="Pilóta Bolt" class="product-img">
+                <div class="product-info">
+                    <div class="product-name">Pilóta Bolt (Űrhajóshop)</div>
+                    <div class="product-desc">Itt tudod elkölteni a játékban szerzett vagyonodat! Vegyél pajzsot ($200) vagy egy szebb dupla plazma ágyút ($400).</div>
+                    <div class="product-price">Bolt megnyitása ➔</div>
+                </div>
+            </a>
+
+            <!-- Fani Autóversenyes Játéka -->
+            <a href="autoverseny.html" class="product-card">
+                <img src="https://via.placeholder.com/90" alt="Autóverseny" class="product-img">
+                <div class="product-info">
+                    <div class="product-name">Fani Autóverseny</div>
+                    <div class="product-desc">Sebesség és izgalom a saját készítésű pályámon. Teszteld a reflexeid!</div>
+                    <div class="product-price">Játék indítása ➔</div>
+                </div>
+            </a>
+        </div>
+
+        <!-- 3. TECH FÜL -->
+        <div id="page-tech" class="sub-page">
+            <div class="page-title">💻 Tech Kedvencek</div>
+            
+            <!-- 3D Nyomtató az eMAG-ról -->
+            <a href="https://www.emag.hu" target="_blank" class="product-card">
+                <img src="https://via.placeholder.com/90" alt="3D Nyomtató" class="product-img">
+                <div class="product-info">
+                    <div class="product-name">3D Nyomtató (eMAG)</div>
+                    <div class="product-desc">Precíziós 3D nyomtató az egyedi alkatrészek és makettek készítéséhez.</div>
+                    <div class="product-price">Megtekintés az eMAG-on ➔</div>
+                </div>
+            </a>
+
+            <!-- Honor 600 Pro -->
+            <a href="https://www.telekom.hu" target="_blank" class="product-card">
+                <img src="https://via.placeholder.com/90" alt="Honor 600 Pro" class="product-img">
+                <div class="product-info">
+                    <div class="product-name">Honor 600 Pro + Fülhallgató (Telekom)</div>
+                    <div class="product-desc">Smaragdzöld színű okostelefon prémium fülhallgatóval csomagolva, közvetlenül a Telekom kínálatából.</div>
+                    <div class="product-price">Megtekintés a Telekom oldalán ➔</div>
+                </div>
+            </a>
+        </div>
+
+        <!-- 4. LEGO ÉS MAKETTEK FÜL -->
+        <div id="page-lego" class="sub-page">
+            <div class="page-title">🧱 LEGO & Menő Makettek</div>
+            
+            <!-- Vasember Makett / Szobor -->
+            <a href="https://www.emag.hu" target="_blank" class="product-card">
+                <img src="https://via.placeholder.com/90" alt="Iron Man" class="product-img">
+                <div class="product-info">
+                    <div class="product-name">Vasember (Iron Man) Menő Makett Szobor</div>
+                    <div class="product-desc">Részletgazdag Bosszúállók Vasember szobor és építhető makett.</div>
+                    <div class="product-price">Megtekintés ➔</div>
+                </div>
+            </a>
+        </div>
+
+    </div>
+
+
+    <!-- LEBEGŐ FIX HUD PANEL -->
+    <div class="hud-panel">
+        <div class="hud-header"><span>⚡</span> Fani HUD</div>
+        <div>
+            <div class="hud-item-btn" onclick="showPage('games')"><span class="hud-icon">🎮</span><span>Játékok: Cockpit + Bolt</span></div>
+            <div class="hud-item-btn" onclick="showPage('tech')"><span class="hud-icon">💻</span><span>Tech: Honor 600 Pro & 3D</span></div>
+            <div class="hud-item-btn" onclick="showPage('lego')"><span class="hud-icon">🧱</span><span>Makett: Vasember szobor</span></div>
+        </div>
+        <div class="hud-divider"></div>
+        <div>
+            <div class="hud-item-btn" onclick="showPage('games')"><span class="hud-icon">⭐</span><span>Aktív: Pilóta Bolt teszt</span></div>
+        </div>
+    </div>
+
+
+    <!-- INTERAKTÍV JAVASCRIPT KÓD -->
+    <script>
+        function toggleMenu() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('overlay').classList.toggle('show');
+        }
+
+        function showPage(pageId) {
+            document.getElementById('page-home').style.display = 'none';
+            document.getElementById('page-games').style.display = 'none';
+            document.getElementById('page-tech').style.display = 'none';
+            document.getElementById('page-lego').style.display = 'none';
+
+            if (pageId === 'home') {
+                document.getElementById('page-home').style.display = 'block';
+            } else {
+                document.getElementById('page-' + pageId).style.display = 'block';
+            }
+
+            document.getElementById('sidebar').classList.remove('open');
+            document.getElementById('overlay').classList.remove('show');
+        }
+    </script>
+</body>
+</html>
