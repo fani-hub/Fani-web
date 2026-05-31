@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Medal of Honor: Budapest Airborne 3D (Javított)</title>
+    <style>
+        body {
+            margin: 0; background-color: #111; color: #d4c5a9;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            min-height: 100vh; overflow: hidden; user-select: none; touch-action: none;
+        }
+        #game-container {
+            position: relative; width: 100%; max-width: 800px; height: 540px;
+            border: 4px solid #3a3f35; background-color: #000;
+        }
+        /* ELIGAZÍTÓ KÉPERNYŐ */
+        #briefing-screen {
+            position: absolute; width: 100%; height: 100%;
+            background: radial-gradient(#2c3026, #141711);
+            padding: 20px; box-sizing: border-box;
+            display: flex; flex-direction: column; justify-content: space-between; z-index: 10;
+        }
+        .briefing-header { text-align: center; border-bottom: 2px dashed #6b775f; color: #fff; }
+        .briefing-main { display: flex; gap: 15px; flex: 1; margin: 10px 0; }
+        .briefing-text {
+            flex: 1; background: rgba(0,0,0,0.5); border: 1px solid #4a5341;
+            padding: 10px; overflow-y: auto; font-size: 13px; line-height: 1.4;
+        }
+        .briefing-sidebar { width: 240px; display: flex; flex-direction: column; gap: 10px; }
+        select, button {
+            width: 100%; background: #2a3024; color: #fff; border: 1px solid #5a664f;
+            padding: 8px; font-family: inherit; font-size: 13px; cursor: pointer;
+        }
+        #start-btn { background: #4e5a43; font-weight: bold; font-size: 14px; padding: 12px; }
+        
+        /* 3D CANVAS & HUD */
+        #three-canvas-container { width: 100%; height: 100%; }
+        #hud {
+            position: absolute; bottom: 0; width: 100%; background: rgba(20, 25, 20, 0.9);
+            border-top: 2px solid #3a4233; display: none; justify-content: space-between;
+            padding: 10px 20px; box-sizing: border-box; font-weight: bold; color: #aec29c; z-index: 5;
+        }
+        .hud-val { color: #fff; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 20px; height: 20px; pointer-events: none; display: none; z-index: 4;
+        }
+        #crosshair::before, #crosshair::after {
+            content: ''; position: absolute; background: #00ff00;
+        }
+        #crosshair::before { top: 9px; left: 0; width: 20px; height: 2px; }
+        #crosshair::after { top: 0; left: 9px; width: 2px; height: 20px; }
+
+        /* MOBIL IRÁNYÍTÁS */
+        #mobile-controls {
+            display: none; width: 100%; max-width: 800px; background: #151813;
+            padding: 10px; border: 4px solid #3a4233; border-top: none;
+            justify-content: space-around; box-sizing: border-box;
+        }
+        .m-btn {
+            background: #333a2e; border: 2px solid #525e4a; color: white;
+            padding: 12px 18px; font-size: 13px; font-weight: bold; border-radius: 6px;
+        }
+    </style>
+    <!-- THREE.JS MOTOR BEKÖTÉSE -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="briefing-screen">
+        <div class="briefing-header">
+            <h2>VALÓDI 3D: „BUDAPEST AIRBORNE” HADITERV</h2>
+            <p>MOH: AIRBORNE MECHANIKA A BÖNGÉSZŐDBEN</p>
+        </div>
+        <div class="briefing-main">
+            <div class="briefing-text">
+                <strong>KÜLDETÉSI UTASÍTÁS:</strong><br><br>
+                Zuhansz a 3D-s város felé. Kormányozd magad a zöld jelzéshez!<br><br>
+                <strong>PC Irányítás:</strong> WASD vagy Nyilak a repüléshez és a mozgáshoz. Egér a célzáshoz (kattintás a lövéshez).<br><br>
+                <strong>Mobil Irányítás:</strong> Alsó gombok a mozgáshoz, a képernyő simításával fordul a kamera.
+            </div>
+            <div class="briefing-sidebar">
+                <select id="mission-select">
+                    <option value="1">1. Szint: A szétlőtt Lánchíd 3D</option>
+                </select>
+                <select id="difficulty-select">
+                    <option value="medium" selected>MEDIUM (Normál)</option>
+                </select>
+                <select id="weapon-select">
+                    <option value="Thompson">Thompson SMG</option>
+                </select>
+            </div>
+        </div>
+        <button id="start-btn">UGORJ A 3D CSATATÉRRE!</button>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="three-canvas-container"></div>
+    
+    <div id="hud">
+        <div>ÉLETERŐ: <span id="hud-hp" class="hud-val">100</span>%</div>
+        <div>FEGYVER: <span id="hud-wpn" class="hud-val">-</span></div>
+        <div>LŐSZER: <span id="hud-ammo" class="hud-val">-</span></div>
+    </div>
+</div>
+
+<div id="mobile-controls">
+    <button class="m-btn" id="m-left">BAL</button>
+    <button class="m-btn" id="m-up">FEL</button>
+    <button class="m-btn" id="m-down">LE</button>
+    <button class="m-btn" id="m-right">JOBB</button>
+    <button class="m-btn" id="m-fire" style="background:#8b2626;">TŰZ</button>
+</div>
+
+<script>
+let scene, camera, renderer;
+let gameState = "BRIEFING";
+let player = { phase: "AIRBORNE", x: 0, z: 0, y: 150, hp: 100, currentWpn: 0, rotY: 0 };
+let weapons = [{name:"Thompson", ammo:90}];
+let keys = {};
+let enemies3D = []; // JAVÍTVA: Nem kezdődhet számmal a változónév!
+let isMobile = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+let targetZoneMesh;
+let gunMesh;
+
+document.getElementById('start-btn').addEventListener('click', () => {
+    document.getElementById('briefing-screen').style.display = 'none';
+    document.getElementById('hud').style.display = 'flex';
+    if(isMobile) document.getElementById('mobile-controls').style.display = 'flex';
+    init3D();
+});
+
+function init3D() {
+    gameState = "PLAYING";
+    
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1c1e);
+    scene.fog = new THREE.FogExp2(0x1a1c1e, 0.015);
+
+    camera = new THREE.PerspectiveCamera(60, 800 / 540, 0.1, 1000);
+    camera.position.set(0, player.y, 0);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(document.getElementById('game-container').clientWidth, 540);
+    document.getElementById('three-canvas-container').appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0x666666);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffddaa, 0.8);
+    dirLight.position.set(20, 40, 20);
+    scene.add(dirLight);
+
+    // Föld
+    const geoFloor = new THREE.PlaneGeometry(500, 500);
+    const matFloor = new THREE.MeshLambertMaterial({ color: 0x2d251e });
+    const floor = new THREE.Mesh(geoFloor, matFloor);
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+
+    // 3D Házak kockákból
+    const geoBox = new THREE.BoxGeometry(15, 30, 15);
+    const matBox = new THREE.MeshLambertMaterial({ color: 0x3a352f });
+    for(let i=0; i<50; i++) {
+        let building = new THREE.Mesh(geoBox, matBox);
+        building.position.x = Math.random() * 200 - 100;
+        building.position.z = Math.random() * 200 - 100;
+        building.position.y = 15;
+        if(Math.hypot(building.position.x, building.position.z) > 25) {
+            scene.add(building);
+        }
+    }
+
+    // Zöld ugrási zóna füstje (Henger)
+    const geoZone = new THREE.CylinderGeometry(12, 12, 0.5, 32);
+    const matZone = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.4 });
+    targetZoneMesh = new THREE.Mesh(geoZone, matZone);
+    targetZoneMesh.position.set(Math.random()*40 - 20, 0.3, Math.random()*40 - 20);
+    scene.add(targetZoneMesh);
+
+    // Fegyver csöve a képernyőn
+    const geoGun = new THREE.CylinderGeometry(0.15, 0.15, 2.5, 8);
+    const matGun = new THREE.MeshLambertMaterial({ color: 0x333333 });
+    gunMesh = new THREE.Mesh(geoGun, matGun);
+    gunMesh.rotation.x = Math.PI / 2;
+    gunMesh.position.set(0.4, -0.4, -1.2);
+    camera.add(gunMesh);
+    scene.add(camera);
+
+    // Ellenségek (Hengerek)
+    for(let e=0; e<4; e++) {
+        const geoEnemy = new THREE.CylinderGeometry(1, 1, 4, 8);
+        const matEnemy = new THREE.MeshLambertMaterial({ color: 0x4b5343 });
+        let enemyMesh = new THREE.Mesh(geoEnemy, matEnemy);
+        enemyMesh.position.set(Math.random()*80 - 40, 2, Math.random()*80 - 40);
+        scene.add(enemyMesh);
+        enemies3D.push(enemyMesh); // JAVÍTVA
+    }
+
+    // Gombnyomások figyelése PC-n
+    window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+    window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+    // Egér mozgás PC-n a célzáshoz
+    window.addEventListener('mousemove', e => {
+        if (player.phase === "GROUND") {
+            player.rotY -= e.movementX * 0.003;
+            camera.rotation.y = player.rotY;
+        }
+    });
+    window.addEventListener('click', () => {
+        if(player.phase === "GROUND" && gameState === "PLAYING") shoot3D();
+    });
+
+    // Mobil gombok eseménykezelői
+    const bindMob = (id, key) => {
+        document.getElementById(id).addEventListener('touchstart', (e) => { keys[key] = true; e.preventDefault(); });
+        document.getElementById(id).addEventListener('touchend', (e) => { keys[key] = false; e.preventDefault(); });
+    };
+    bindMob('m-left', 'arrowleft'); bindMob('m-right', 'arrowright');
+    bindMob('m-up', 'arrowup'); bindMob('m-down', 'arrowdown');
+    document.getElementById('m-fire').addEventListener('touchstart', (e) => { shoot3D(); e.preventDefault(); });
+
+    updateHUD3D();
+    animate3D();
+}
+
+function updateHUD3D() {
+    document.getElementById('hud-hp').innerText = player.hp;
+    document.getElementById('hud-wpn').innerText = weapons[player.currentWpn].name;
+    document.getElementById('hud-ammo').innerText = weapons[player.currentWpn].ammo;
+}
+
+function shoot3D() {
+    if(weapons[player.currentWpn].ammo > 0) {
+        weapons[player.currentWpn].ammo--;
+        updateHUD3D();
+
+        enemies3D.forEach((enemy, idx) => {
+            let dist = camera.position.distanceTo(enemy.position);
+            if(dist < 50) { 
+                enemy.position.y -= 1.5;
+                if(enemy.position.y < -2) {
+                    scene.remove(enemy);
+                    enemies3D.splice(idx, 1);
+                }
+            }
+        });
+
+        if(enemies3D.length === 0) {
+            gameState = "VICTORY";
+            alert("GYŐZELEM! Budapest felszabadítva!");
+            location.reload();
+        }
+    }
+}
+
+function animate3D() {
+    if (gameState !== "PLAYING") return;
+    requestAnimationFrame(animate3D);
+
+    // 1. ZUHANÁSI FÁZIS
+    if (player.phase === "AIRBORNE") {
+        player.y -= 0.35; 
+        camera.position.y = player.y;
+
+        if (keys['arrowleft'] || keys['a']) camera.position.x -= 0.4;
+        if (keys['arrowright'] || keys['d']) camera.position.x += 0.4;
+        if (keys['arrowup'] || keys['w']) camera.position.z -= 0.4;
+        if (keys['arrowdown'] || keys['s']) camera.position.z += 0.4;
+
+        camera.rotation.x = -Math.PI / 5; // Lefelé néz zuhanáskor
+
+        if (player.y <= 2) {
+            player.phase = "GROUND";
+            camera.rotation.x = 0; 
+            document.getElementById('crosshair').style.display = 'block';
+
+            let distToZone = Math.hypot(camera.position.x - targetZoneMesh.position.x, camera.position.z - targetZoneMesh.position.z);
+            if(distToZone < 15) {
+                weapons[player.currentWpn].ammo = 90;
+                alert("LANDOLÁS SIKERES! Harcolj!");
+            } else {
+                player.hp -= 20;
+                alert("ROSSZ LANDOLÁS! Ellenséges terület.");
+            }
+            updateHUD3D();
+        }
+    } 
+    // 2. FÖLDI FPS FÁZIS
+    else if (player.phase === "GROUND") {
+        let speed = 0.25;
+        if (keys['arrowup'] || keys['w']) {
+            camera.position.x -= Math.sin(player.rotY) * speed;
+            camera.position.z -= Math.cos(player.rotY) * speed;
+        }
+        if (keys['arrowdown'] || keys['s']) {
+            camera.position.x += Math.sin(player.rotY) * speed;
+            camera.position.z += Math.cos(player.rotY) * speed;
+        }
+        if (keys['arrowleft'] || keys['a']) { player.rotY += 0.03; camera.rotation.y = player.rotY; }
+        if (keys['arrowright'] || keys['d']) { player.rotY -= 0.03; camera.rotation.y = player.rotY; }
+
+        if(Math.random() < 0.005 && enemies3D.length > 0) {
+            player.hp -= 5;
+            updateHUD3D();
+            if(player.hp <= 0) {
+                gameState = "GAMEOVER";
+                alert("JÁTÉK VÉGE! Elesetél a harcban.");
+                location.reload();
+            }
+        }
+    }
+
+    renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
