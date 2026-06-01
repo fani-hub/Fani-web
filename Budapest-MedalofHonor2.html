@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Budapest Game</title>
+
+<style>
+body { margin:0; overflow:hidden; background:#000; }
+
+/* mobil joystick hely */
+#joystick {
+  position: fixed;
+  bottom: 40px;
+  left: 40px;
+  width: 120px;
+  height: 120px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 50%;
+  touch-action: none;
+}
+
+#stick {
+  position:absolute;
+  width:50px;
+  height:50px;
+  background:rgba(255,255,255,0.3);
+  border-radius:50%;
+  top:35px;
+  left:35px;
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+</head>
+
+<body>
+
+<div id="joystick"><div id="stick"></div></div>
+
+<script>
+// ========================
+// 1. ALAP THREE.JS MOTOR
+// ========================
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(
+  75,
+  window.innerWidth/window.innerHeight,
+  0.1,
+  1000
+);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// ====== TALAJ ======
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(200,200),
+  new THREE.MeshBasicMaterial({color:0x2e8b57})
+);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
+
+// ====== EGYSZERŰ ÉPÜLETEK ======
+for(let i=0;i<20;i++){
+  const h = Math.random()*10+2;
+
+  const building = new THREE.Mesh(
+    new THREE.BoxGeometry(3,h,3),
+    new THREE.MeshBasicMaterial({color:0x555555})
+  );
+
+  building.position.set(
+    (Math.random()-0.5)*80,
+    h/2,
+    (Math.random()-0.5)*80
+  );
+
+  scene.add(building);
+}
+
+// ====== JÁTÉKOS (kamera) ======
+camera.position.set(0,2,5);
+
+// ========================
+// 2. INPUT RENDSZER
+// ========================
+
+let keys = {};
+
+document.addEventListener("keydown", e=>keys[e.key.toLowerCase()]=true);
+document.addEventListener("keyup", e=>keys[e.key.toLowerCase()]=false);
+
+// ====== MOBIL JOYSTICK ======
+let joyX = 0;
+let joyY = 0;
+
+const joystick = document.getElementById("joystick");
+const stick = document.getElementById("stick");
+
+let dragging = false;
+
+joystick.addEventListener("touchstart", ()=>dragging=true);
+
+joystick.addEventListener("touchend", ()=>{
+  dragging=false;
+  joyX=0; joyY=0;
+  stick.style.left="35px";
+  stick.style.top="35px";
+});
+
+joystick.addEventListener("touchmove", (e)=>{
+  if(!dragging) return;
+
+  let t = e.touches[0];
+  let r = joystick.getBoundingClientRect();
+
+  let x = t.clientX - r.left - 60;
+  let y = t.clientY - r.top - 60;
+
+  joyX = x/50;
+  joyY = y/50;
+
+  stick.style.left = 35 + x + "px";
+  stick.style.top = 35 + y + "px";
+});
+
+// ========================
+// 3. MOZGÁS
+// ========================
+
+function update(){
+  const speed = 0.15;
+
+  // PC
+  if(keys["w"]) camera.position.z -= speed;
+  if(keys["s"]) camera.position.z += speed;
+  if(keys["a"]) camera.position.x -= speed;
+  if(keys["d"]) camera.position.x += speed;
+
+  // MOBILE
+  camera.position.x += joyX * speed;
+  camera.position.z += joyY * speed;
+}
+
+// ========================
+// 4. LOOP
+// ========================
+
+function animate(){
+  requestAnimationFrame(animate);
+  update();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+window.addEventListener("resize", ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+
+</body>
+</html><script>
+
+// ========================
+// FPS KAMERA (LOOK)
+// ========================
+
+let pitch = 0;
+let yaw = 0;
+
+const sensitivity = 0.002;
+
+// PC egér mozgatás
+document.addEventListener("mousemove", (e)=>{
+  yaw -= e.movementX * sensitivity;
+  pitch -= e.movementY * sensitivity;
+
+  pitch = Math.max(-1.5, Math.min(1.5, pitch));
+});
+
+// mobil swipe kamera
+let lastTouch = null;
+
+document.addEventListener("touchmove", (e)=>{
+  if(e.touches.length !== 1) return;
+
+  let t = e.touches[0];
+
+  if(lastTouch){
+    let dx = t.clientX - lastTouch.x;
+    let dy = t.clientY - lastTouch.y;
+
+    yaw -= dx * 0.003;
+    pitch -= dy * 0.003;
+
+    pitch = Math.max(-1.5, Math.min(1.5, pitch));
+  }
+
+  lastTouch = {x:t.clientX, y:t.clientY};
+});
+
+document.addEventListener("touchend", ()=>{
+  lastTouch = null;
+});
+
+// ========================
+// LÖVÉS (RAYCAST ALAP)
+// ========================
+
+const raycaster = new THREE.Raycaster();
+
+function shoot(){
+
+  raycaster.setFromCamera({x:0,y:0}, camera);
+
+  const intersects = raycaster.intersectObjects(scene.children);
+
+  if(intersects.length > 0){
+    const hit = intersects[0].object;
+
+    // ha épület vagy valami
+    if(hit){
+      hit.material.color.set(0xff0000);
+
+      setTimeout(()=>{
+        hit.material.color.set(0x555555);
+      }, 200);
+    }
+  }
+}
+
+// PC lövés
+document.addEventListener("mousedown", shoot);
+
+// mobil tap = lövés
+document.addEventListener("touchstart", (e)=>{
+  if(e.touches.length === 1) shoot();
+});
+
+// ========================
+// UPDATE FELÜLÍRÁS
+// ========================
+
+function update(){
+  const speed = 0.15;
+
+  if(keys["w"]) camera.position.z -= Math.cos(yaw)*speed;
+  if(keys["s"]) camera.position.z += Math.cos(yaw)*speed;
+  if(keys["a"]) camera.position.x -= Math.sin(yaw)*speed;
+  if(keys["d"]) camera.position.x += Math.sin(yaw)*speed;
+
+  camera.position.x += joyX * speed;
+  camera.position.z += joyY * speed;
+
+  // kamera irány
+  camera.rotation.set(pitch, yaw, 0);
+}
+
+</script>
+
+<!-- célkereszt -->
+<div style="
+position:fixed;
+top:50%;
+left:50%;
+width:10px;
+height:10px;
+margin-left:-5px;
+margin-top:-5px;
+background:white;
+border-radius:50%;
+"></div><script>
+
+// ========================
+// PLAYER ÉLET
+// ========================
+let health = 100;
+
+// ========================
+// ELLENSÉGEK
+// ========================
+const enemies = [];
+
+function createEnemy(x, z){
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(2,3,2),
+    new THREE.MeshBasicMaterial({color:0xff0000})
+  );
+
+  mesh.position.set(x,1.5,z);
+  scene.add(mesh);
+
+  enemies.push({
+    mesh: mesh,
+    speed: 0.02
+  });
+}
+
+// több ellenség
+for(let i=0;i<8;i++){
+  createEnemy(
+    (Math.random()-0.5)*60,
+    (Math.random()-0.5)*60
+  );
+}
+
+// ========================
+// AI (KÖVETÉS)
+// ========================
+function updateEnemies(){
+
+  enemies.forEach(e=>{
+
+    let dx = camera.position.x - e.mesh.position.x;
+    let dz = camera.position.z - e.mesh.position.z;
+
+    let dist = Math.sqrt(dx*dx + dz*dz);
+
+    if(dist < 30){ // ha lát
+      e.mesh.position.x += dx * e.speed;
+      e.mesh.position.z += dz * e.speed;
+    }
+
+    // támadás
+    if(dist < 2){
+      health -= 0.3;
+    }
+  });
+}
+
+// ========================
+// LÖVÉS FRISSÍTVE (ELLENSÉG TALÁLAT)
+// ========================
+function shoot(){
+
+  raycaster.setFromCamera({x:0,y:0}, camera);
+
+  const hits = raycaster.intersectObjects(scene.children);
+
+  if(hits.length > 0){
+
+    const obj = hits[0].object;
+
+    // ellenség találat
+    const enemy = enemies.find(e => e.mesh === obj);
+
+    if(enemy){
+      scene.remove(enemy.mesh);
+      enemies.splice(enemies.indexOf(enemy),1);
+      return;
+    }
+
+    // fal találat effekt
+    obj.material.color.set(0xffff00);
+    setTimeout(()=>obj.material.color.set(0x555555),200);
+  }
+}
+
+// ========================
+// HALÁL
+// ========================
+function checkDeath(){
+  if(health <= 0){
+    alert("Meghaltál! Újraindítás...");
+    location.reload();
+  }
+}
+
+// ========================
+// UPDATE FRISSÍTÉS
+// ========================
+const oldUpdate = update;
+
+update = function(){
+  oldUpdate();
+  updateEnemies();
+  checkDeath();
+};
+
+</script><script>
+
+// ========================
+// KÜLDETÉS RENDSZER
+// ========================
+let objectives = {
+  enemiesKilled: 0,
+  targetKills: 5,
+  suppliesCollected: 0,
+  targetSupplies: 3
+};
+
+let stars = 0;
+
+// ========================
+// UTÁNPÓTLÁS
+// ========================
+const supplies = [];
+
+function createSupply(x,z,type){
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(1.5,1.5,1.5),
+    new THREE.MeshBasicMaterial({
+      color: type === "health" ? 0x00ff00 : 0x0000ff
+    })
+  );
+
+  mesh.position.set(x,0.75,z);
+  scene.add(mesh);
+
+  supplies.push({mesh,type});
+}
+
+for(let i=0;i<6;i++){
+  createSupply(
+    (Math.random()-0.5)*60,
+    (Math.random()-0.5)*60,
+    Math.random()>0.5 ? "health" : "ammo"
+  );
+}
+
+// ========================
+// UTÁNPÓTLÁS FELVÉTEL
+// ========================
+function checkSupplies(){
+
+  supplies.forEach(s=>{
+
+    let dx = camera.position.x - s.mesh.position.x;
+    let dz = camera.position.z - s.mesh.position.z;
+
+    if(Math.sqrt(dx*dx + dz*dz) < 2){
+
+      scene.remove(s.mesh);
+      supplies.splice(supplies.indexOf(s),1);
+
+      objectives.suppliesCollected++;
+
+      if(s.type === "health"){
+        health = Math.min(100, health + 30);
+      }
+    }
+  });
+}
+
+// ========================
+// CSILLAG RENDSZER
+// ========================
+function calculateStars(){
+
+  stars = 1;
+
+  if(health > 70) stars++;
+  if(objectives.suppliesCollected >= objectives.targetSupplies) stars++;
+}
+
+// ========================
+// MINIMAP (EGYSZERŰ RADAR)
+// ========================
+const minimap = document.createElement("canvas");
+minimap.width = 150;
+minimap.height = 150;
+minimap.style.position = "fixed";
+minimap.style.top = "20px";
+minimap.style.right = "20px";
+minimap.style.border = "2px solid white";
+document.body.appendChild(minimap);
+
+const mctx = minimap.getContext("2d");
+
+function drawMinimap(){
+
+  mctx.fillStyle = "black";
+  mctx.fillRect(0,0,150,150);
+
+  // játékos
+  mctx.fillStyle = "white";
+  mctx.fillRect(75,75,4,4);
+
+  // ellenségek
+  enemies.forEach(e=>{
+    let dx = e.mesh.position.x - camera.position.x;
+    let dz = e.mesh.position.z - camera.position.z;
+
+    mctx.fillStyle = "red";
+    mctx.fillRect(75 + dx*2, 75 + dz*2, 3, 3);
+  });
+}
+
+// ========================
+// KÜLDETÉS FRISSÍTÉS
+// ========================
+function updateObjectives(){
+
+  if(objectives.enemiesKilled >= objectives.targetKills){
+    calculateStars();
+  }
+}
+
+// ========================
+// UPDATE BELEÉPÍTÉS
+// ========================
+const oldUpdate2 = update;
+
+update = function(){
+  oldUpdate2();
+
+  checkSupplies();
+  updateObjectives();
+  drawMinimap();
+};
+
+</script><script>
+
+// ========================
+// HUD FELÜLET
+// ========================
+const hud = document.createElement("div");
+hud.style.position = "fixed";
+hud.style.bottom = "20px";
+hud.style.left = "20px";
+hud.style.color = "white";
+hud.style.fontFamily = "Arial";
+hud.style.fontSize = "18px";
+hud.style.background = "rgba(0,0,0,0.5)";
+hud.style.padding = "10px";
+hud.style.borderRadius = "8px";
+document.body.appendChild(hud);
+
+// ========================
+// CÉL SZÖVEG
+// ========================
+const missionText = document.createElement("div");
+missionText.style.position = "fixed";
+missionText.style.top = "20px";
+missionText.style.left = "20px";
+missionText.style.color = "white";
+missionText.style.fontFamily = "Arial";
+missionText.style.fontSize = "18px";
+missionText.style.background = "rgba(0,0,0,0.5)";
+missionText.style.padding = "10px";
+missionText.style.borderRadius = "8px";
+missionText.innerHTML = "🎯 Küldetés: Semlegesíts 5 ellenséget";
+document.body.appendChild(missionText);
+
+// ========================
+// WIN / LOSE SCREEN
+// ========================
+const endScreen = document.createElement("div");
+endScreen.style.position = "fixed";
+endScreen.style.top = "0";
+endScreen.style.left = "0";
+endScreen.style.width = "100%";
+endScreen.style.height = "100%";
+endScreen.style.display = "none";
+endScreen.style.alignItems = "center";
+endScreen.style.justifyContent = "center";
+endScreen.style.flexDirection = "column";
+endScreen.style.background = "rgba(0,0,0,0.8)";
+endScreen.style.color = "white";
+endScreen.style.fontSize = "40px";
+endScreen.style.fontFamily = "Arial";
+document.body.appendChild(endScreen);
+
+// ========================
+// VÉGE LOGIKA
+// ========================
+let gameEnded = false;
+
+function winGame(){
+  if(gameEnded) return;
+  gameEnded = true;
+
+  endScreen.style.display = "flex";
+  endScreen.innerHTML = "🏆 MISSZIÓ TELJESÍTVE<br><br>Csillagok: " + stars;
+}
+
+function loseGame(){
+  if(gameEnded) return;
+  gameEnded = true;
+
+  endScreen.style.display = "flex";
+  endScreen.innerHTML = "💀 MEGHALTÁL<br><br>Próbáld újra!";
+}
+
+// ========================
+// HUD FRISSÍTÉS
+// ========================
+function updateHUD(){
+
+  hud.innerHTML =
+  "❤️ Élet: " + Math.round(health) + "<br>" +
+  "🤖 Ellenségek: " + enemies.length + "<br>" +
+  "⭐ Csillagok: " + stars;
+
+  // win feltétel
+  if(enemies.length === 0 && objectives.enemiesKilled >= objectives.targetKills){
+    winGame();
+  }
+
+  // lose feltétel
+  if(health <= 0){
+    loseGame();
+  }
+}
+
+// ========================
+// UPDATE BEKÖTÉS
+// ========================
+const oldUpdate3 = update;
+
+update = function(){
+  oldUpdate3();<script>
+
+// ========================
+// FEJLETT AI
+// ========================
+function updateEnemies(){
+
+  enemies.forEach(e=>{
+
+    let dx = camera.position.x - e.mesh.position.x;
+    let dz = camera.position.z - e.mesh.position.z;
+
+    let dist = Math.sqrt(dx*dx + dz*dz);
+
+    // ha messze van → közelít
+    if(dist < 35 && dist > 2){
+      e.mesh.position.x += dx * e.speed;
+      e.mesh.position.z += dz * e.speed;
+    }
+
+    // ha közel van → támad
+    if(dist <= 2){
+      health -= 0.4;
+    }
+
+    // ha túl messze → random járőr
+    if(dist >= 35){
+      e.mesh.position.x += (Math.random()-0.5)*0.05;
+      e.mesh.position.z += (Math.random()-0.5)*0.05;
+    }
+  });
+}
+
+// ========================
+// LÖVÉS COOLDOWN
+// ========================
+let canShoot = true;
+
+function shoot(){
+
+  if(!canShoot) return;
+  canShoot = false;
+
+  setTimeout(()=>canShoot=true, 300);
+
+  raycaster.setFromCamera({x:0,y:0}, camera);
+
+  const hits = raycaster.intersectObjects(scene.children);
+
+  if(hits.length > 0){
+
+    const obj = hits[0].object;
+
+    const enemy = enemies.find(e => e.mesh === obj);
+
+    if(enemy){
+      scene.remove(enemy.mesh);
+      enemies.splice(enemies.indexOf(enemy),1);
+
+      objectives.enemiesKilled++;
+      return;
+    }
+
+    obj.material.color.set(0xffff00);
+    setTimeout(()=>obj.material.color.set(0x555555),150);
+  }
+}
+
+// ========================
+// BUDAPEST HANGULAT (EGYSZERŰ)
+// ========================
+
+// köd
+scene.fog = new THREE.Fog(0x87ceeb, 10, 120);
+
+// égbolt változtatás
+scene.background = new THREE.Color(0x9ec9ff);
+
+// ========================
+// CÉL IRÁNY SEGÍTSÉG
+// ========================
+const target = new THREE.Vector3(30,0,30);
+
+const targetMarker = new THREE.Mesh(
+  new THREE.SphereGeometry(0.5, 8, 8),
+  new THREE.MeshBasicMaterial({color:0xffff00})
+);
+
+targetMarker.position.copy(target);
+scene.add(targetMarker);
+
+function updateTargetHint(){
+
+  let dx = target.x - camera.position.x;
+  let dz = target.z - camera.position.z;
+
+  let dist = Math.sqrt(dx*dx + dz*dz);
+
+  missionText.innerHTML =
+  "🎯 Cél: menj a jelölt pontra<br>" +
+  "📍 Távolság: " + Math.round(dist) + "m<br>" +
+  "🔫 Küldetés: " + objectives.enemiesKilled + "/" + objectives.targetKills;
+}
+
+// ========================
+// UPDATE BEKÖTÉS
+// ========================
+const oldUpdate4 = update;
+
+update = function(){
+  oldUpdate4();
+  updateEnemies();
+  updateTargetHint();
+};
+
+</script><script>
+
+// ========================
+// STABIL KILL SZÁMLÁLÁS FIX
+// ========================
+function removeEnemy(enemy){
+  scene.remove(enemy.mesh);
+  enemies.splice(enemies.indexOf(enemy),1);
+  objectives.enemiesKilled++;
+}
+
+// ========================
+// JAVÍTOTT SHOOT (FIX)
+// ========================
+function shoot(){
+
+  if(!canShoot) return;
+  canShoot = false;
+  setTimeout(()=>canShoot=true, 250);
+
+  raycaster.setFromCamera({x:0,y:0}, camera);
+
+  const hits = raycaster.intersectObjects(scene.children);
+
+  if(hits.length > 0){
+
+    const obj = hits[0].object;
+
+    const enemy = enemies.find(e => e.mesh === obj);
+
+    if(enemy){
+      removeEnemy(enemy);
+      return;
+    }
+
+    obj.material.color.set(0xffaa00);
+    setTimeout(()=>obj.material.color.set(0x555555),150);
+  }
+}
+
+// ========================
+// WIN FELTÉTEL FIX
+// ========================
+function checkWin(){
+
+  if(objectives.enemiesKilled >= objectives.targetKills){
+    winGame();
+  }
+}
+
+// ========================
+// GAME LOOP FIX
+// ========================
+const oldUpdateFinal = update;
+
+update = function(){
+
+  oldUpdateFinal();
+
+  checkWin();
+};
+
+// ========================
+// RESTART GOMB
+// ========================
+const restartBtn = document.createElement("button");
+restartBtn.innerHTML = "Újraindítás";
+restartBtn.style.position = "fixed";
+restartBtn.style.top = "50%";
+restartBtn.style.left = "50%";
+restartBtn.style.transform = "translate(-50%,-50%)";
+restartBtn.style.padding = "15px 30px";
+restartBtn.style.fontSize = "20px";
+restartBtn.style.display = "none";
+
+document.body.appendChild(restartBtn);
+
+restartBtn.onclick = () => location.reload();
+
+// mutassuk ha vége a játéknak
+const oldLose = loseGame;
+loseGame = function(){
+  oldLose();
+  restartBtn.style.display = "block";
+};
+
+const oldWin = winGame;
+winGame = function(){
+  oldWin();
+  restartBtn.style.display = "block";
+};
+
+</script>
+  updateHUD();
+};
+
+</script>
