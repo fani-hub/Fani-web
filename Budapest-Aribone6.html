@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Medal of Honor: Budapest Airborne 3D — REAL SOLDIERS UPDATE</title>
+    <style>
+        body {
+            margin: 0; background-color: #0b0c10; color: #c5c6c7;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            min-height: 100vh; overflow: hidden; user-select: none; touch-action: none;
+        }
+        #game-container {
+            position: relative; width: 100%; max-width: 900px; height: 600px;
+            border: 4px solid #1f2833; background-color: #000;
+            box-shadow: 0 0 50px rgba(0,0,0,0.9); border-radius: 6px;
+        }
+        #briefing-screen {
+            position: absolute; width: 100%; height: 100%;
+            background: radial-gradient(#1f2833, #0b0c10);
+            padding: 30px; box-sizing: border-box;
+            display: flex; flex-direction: column; justify-content: space-between; z-index: 10;
+        }
+        .briefing-header { text-align: center; border-bottom: 2px solid #45f3ff; color: #fff; padding-bottom: 10px; }
+        .briefing-header h1 { margin: 5px 0; letter-spacing: 2px; text-shadow: 2px 2px #000; font-size: 24px; color: #45f3ff; }
+        .briefing-main { display: flex; gap: 20px; flex: 1; margin: 20px 0; overflow: hidden; }
+        .briefing-text {
+            flex: 1; background: rgba(0, 0, 0, 0.85); border: 1px solid #1f2833;
+            padding: 20px; overflow-y: auto; font-size: 13px; line-height: 1.6; border-radius: 4px;
+        }
+        .briefing-sidebar { width: 260px; display: flex; flex-direction: column; gap: 15px; }
+        .form-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 11px; color: #45f3ff; font-weight: bold; text-transform: uppercase; }
+        select, button {
+            width: 100%; background: #1f2833; color: #fff; border: 1px solid #45f3ff;
+            padding: 10px; font-family: inherit; font-size: 13px; cursor: pointer; border-radius: 4px;
+        }
+        #start-btn { 
+            background: #66fcf1; color: #0b0c10; font-weight: bold; font-size: 16px; padding: 15px; 
+            border: none; box-shadow: 0 0 15px rgba(102,252,241,0.4); letter-spacing: 1px;
+        }
+        #start-btn:hover { background: #45e3d7; cursor: pointer; }
+        
+        #three-canvas-container { width: 100%; height: 100%; }
+        #hud {
+            position: absolute; bottom: 0; width: 100%; 
+            background: rgba(11, 12, 16, 0.9);
+            border-top: 2px solid #1f2833; display: none; justify-content: space-between;
+            padding: 12px 25px; box-sizing: border-box; font-weight: bold; z-index: 5;
+        }
+        .hud-sector { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+        .hud-label { font-size: 10px; color: #66fcf1; text-transform: uppercase; }
+        .hud-val { color: #fff; font-size: 16px; }
+        
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 24px; height: 24px; pointer-events: none; display: none; z-index: 4;
+        }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #45f3ff; }
+        #crosshair::before { top: 11px; left: 0; width: 24px; height: 2px; }
+        #crosshair::after { top: 0; left: 11px; width: 2px; height: 24px; }
+
+        #mobile-controls {
+            display: none; width: 100%; max-width: 900px; background: #0b0c10;
+            padding: 10px; border: 4px solid #1f2833; border-top: none;
+            justify-content: space-around; box-sizing: border-box; gap: 5px;
+        }
+        .m-btn {
+            background: #1f2833; border: 1px solid #66fcf1; color: white;
+            padding: 12px 0; font-size: 12px; font-weight: bold; border-radius: 4px; flex: 1; text-align: center;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="briefing-screen">
+        <div class="briefing-header">
+            <h1>MEDAL OF Honor: BUDAPEST AIRBORNE</h1>
+            <p>GRAFIKAI JAVÍTÁS — IGAZI KATONÁK & PESTI BÉRHÁZAK</p>
+        </div>
+        <div class="briefing-main">
+            <div class="briefing-text">
+                <strong>JELENTÉS A PESTI TŰZVONALRÓL:</strong><br><br>
+                Vége a palackfejű bábuknak! Megérkezett az igazi hadsereg.<br><br>
+                * <strong>Katonák lábakkal és fegyverrel:</strong> Minden szövetséges és német katona külön testrészekből áll. Látni fogod a lábaikat lépkedni, a karjaikat és a kezükben tartott puskákat!<br>
+                * <strong>Pesti utcakép:</strong> A harctér tele van pesti bérházakkal (ablakokkal, tetővel) és a bombázásokból visszamaradt romos betontömbökkel.<br>
+                * <strong>Kifogyó tartalékok:</strong> A háború open-world és addig tart, amíg a 40-40 fős sereg valahol el nem fogy a sikátorokban.<br><br>
+                <strong>PC INDÍTÁS:</strong> Kattints a gombra, majd kattints a 3D nézetbe az egérrel a WASD irányításhoz!
+            </div>
+            <div class="briefing-sidebar">
+                <div class="form-group">
+                    <label>Budapesti Küldetés</label>
+                    <select id="mission-select">
+                        <option value="ostrom">Budapest — Belvárosi utcai harcok</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Nehézség</label>
+                    <select id="difficulty-select">
+                        <option value="easy">Kezdő (EASY)</option>
+                        <option value="medium" selected>Közepes (MEDIUM)</option>
+                        <option value="hard">Veterán (HARD)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Fegyver választás</label>
+                    <select id="weapon-select">
+                        <option value="0">Thompson M1A1 (Géppisztoly)</option>
+                        <option value="1">M1 Garand (Puska)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <button id="start-btn">INDÍTÁS: JÁTÉK VALÓDI EMBEREKKEL</button>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="three-canvas-container"></div>
+    
+    <div id="hud">
+        <div class="hud-sector"><span class="hud-label">ÉLETERŐ</span><span id="hud-hp" class="hud-val">100%</span></div>
+        <div class="hud-sector"><span class="hud-label">AMERIKAI SEREG (USA)</span><span id="hud-allies-left" style="color:#45f3ff;" class="hud-val">40 / 40</span></div>
+        <div class="hud-sector"><span class="hud-label">NÉMET SEREG (GER)</span><span id="hud-enemies-left" style="color:#ff4d4d;" class="hud-val">40 / 40</span></div>
+        <div class="hud-sector"><span class="hud-label">FEGYVER</span><span id="hud-wpn" class="hud-val">-</span></div>
+        <div class="hud-sector"><span class="hud-label">LŐSZER</span><span id="hud-ammo" class="hud-val">-</span></div>
+    </div>
+</div>
+
+<div id="mobile-controls">
+    <button class="m-btn" id="m-left">BAL</button>
+    <button class="m-btn" id="m-up">ELŐRE</button>
+    <button class="m-btn" id="m-down">HÁTRA</button>
+    <button class="m-btn" id="m-right">JOBB</button>
+    <button class="m-btn" id="m-fire" style="background:#ff4d4d; color:#000;">TŰZ</button>
+</div>
+
+<script>
+let scene, camera, renderer;
+let gameState = "BRIEFING";
+let diffLevel = "medium";
+
+let totalAlliesPool = 40;
+let totalEnemiesPool = 40;
+const MAX_ALLIES_ON_STAGE = 8;
+const MAX_ENEMIES_ON_STAGE = 10;
+
+let player = { phase: "AIRBORNE", x: 0, z: 0, y: 150, hp: 100, maxHp: 100, currentWpn: 0, rotY: 0 };
+let weapons = [
+    { name: "Thompson M1A1", ammo: 90, maxAmmo: 90, dmg: 35, fireRate: 130 },
+    { name: "M1 Garand", ammo: 32, maxAmmo: 32, dmg: 80, fireRate: 350 }
+];
+
+let keys = {};
+let enemies3D = [];
+let allyNPCs = []; 
+let projectiles = []; 
+let isMobile = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+let gunGroup, muzzleFlashMesh;
+let lastShotTime = 0;
+let globalTime = 0;
+
+// TEXTÚRA GENERÁTOROK (HÁZAKHOZ)
+function createPestiHouseTexture() {
+    const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#5c4033'; ctx.fillRect(0, 0, 256, 256); // Régi pesti barna vakolat
+    ctx.fillStyle = '#3d2b22'; // Téglacsíkok
+    for(let y=0; y<256; y+=16) { ctx.fillRect(0, y, 256, 2); }
+    // Világító ablakok a házfalakon
+    ctx.fillStyle = '#ffdf6d';
+    for(let y=20; y<240; y+=45) {
+        for(let x=20; x<240; x+=40) {
+            if(Math.random() > 0.3) ctx.fillRect(x, y, 16, 24);
+        }
+    }
+    return new THREE.CanvasTexture(canvas);
+}
+
+document.getElementById('start-btn').addEventListener('click', () => {
+    diffLevel = document.getElementById('difficulty-select').value;
+    if(diffLevel === "easy") { player.hp = 150; player.maxHp = 150; }
+    if(diffLevel === "medium") { player.hp = 100; player.maxHp = 100; }
+    if(diffLevel === "hard") { player.hp = 75; player.maxHp = 75; }
+
+    player.currentWpn = parseInt(document.getElementById('weapon-select').value);
+    document.getElementById('briefing-screen').style.display = 'none';
+    document.getElementById('hud').style.display = 'flex';
+    if(isMobile) document.getElementById('mobile-controls').style.display = 'flex';
+    
+    init3DGame();
+});
+
+function init3DGame() {
+    gameState = "PLAYING";
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a2238); // Sötét, háborús pesti égbolt
+    scene.fog = new THREE.FogExp2(0x1a2238, 0.005);
+
+    camera = new THREE.PerspectiveCamera(60, document.getElementById('game-container').clientWidth / 600, 0.1, 1000);
+    camera.position.set(0, player.y, 0);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(document.getElementById('game-container').clientWidth, 600);
+    document.getElementById('three-canvas-container').appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0x777777));
+    const sun = new THREE.DirectionalLight(0xffe6aa, 1.2); sun.position.set(100, 150, 50); scene.add(sun);
+
+    // Óriási pesti flaszter (Open World talaj)
+    const floorGeo = new THREE.PlaneGeometry(1600, 1600);
+    const floorMat = new THREE.MeshLambertMaterial({ color: 0x2e3138 });
+    const floor = new THREE.Mesh(floorGeo, floorMat); floor.rotation.x = -Math.PI / 2; scene.add(floor);
+
+    // 🏙️ PESTI BÉRHÁZAK ÉS ROMOK GENERÁLÁSA Szanaszét
+    const houseTex = createPestiHouseTexture();
+    const houseMat = new THREE.MeshLambertMaterial({ map: houseTex });
+    const houseGeo = new THREE.BoxGeometry(40, 70, 40);
+
+    const rubbleMat = new THREE.MeshLambertMaterial({ color: 0x555a60 }); // Romhalmazok
+    const rubbleGeo = new THREE.BoxGeometry(8, 4, 8);
+
+    for(let i=0; i<70; i++) {
+        let hX = Math.random() * 600 - 300;
+        let hZ = Math.random() * 600 - 300;
+        
+        if(Math.hypot(hX, hZ) > 35) {
+            // Egy pesti ház lehelyezése
+            let house = new THREE.Mesh(houseGeo, houseMat);
+            house.position.set(hX, 35, hZ);
+            scene.add(house);
+
+            // Romok és törmelékek a házak mellé az utcára
+            for(let r=0; r<2; r++) {
+                let rubble = new THREE.Mesh(rubbleGeo, rubbleMat);
+                rubble.position.set(hX + (Math.random()*30 - 15), 2, hZ + (Math.random()*30 - 15));
+                rubble.rotation.set(Math.random(), Math.random(), Math.random());
+                scene.add(rubble);
+            }
+        }
+    }
+
+    // FPS Fegyver a kézbe
+    gunGroup = new THREE.Group();
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.5, 8), new THREE.MeshStandardMaterial({ color: 0x1f2833, metalness: 0.8 }));
+    barrel.rotation.x = Math.PI / 2; gunGroup.add(barrel);
+    muzzleFlashMesh = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.7, 8), new THREE.MeshBasicMaterial({ color: 0xffea00, transparent: true, opacity: 0.9 }));
+    muzzleFlashMesh.rotation.x = -Math.PI / 2; muzzleFlashMesh.position.set(0, 0, -1.5); muzzleFlashMesh.visible = false; gunGroup.add(muzzleFlashMesh);
+    gunGroup.position.set(0.35, -0.35, -1.1); camera.add(gunGroup); scene.add(camera);
+
+    maintainUnits();
+
+    // Inputok
+    window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+    window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+    window.addEventListener('mousemove', e => {
+        if (player.phase === "GROUND" && gameState === "PLAYING") {
+            player.rotY -= e.movementX * 0.004; camera.rotation.y = player.rotY;
+        }
+    });
+    window.addEventListener('mousedown', () => { if(player.phase === "GROUND" && gameState === "PLAYING") triggerPlayerShot(); });
+
+    updateHUD3D();
+    animate3DGame();
+}
+
+// 🧍 IGAZI KATONA GENERÁTOR (Végtagokkal, nem sörösüveg bábukkal!)
+function createHumanSoldierMesh(isAlly) {
+    const group = new THREE.Group();
+
+    // Ruha és felszerelés színei
+    const bodyMat = new THREE.MeshLambertMaterial({ color: isAlly ? 0x4b5320 : 0x5a6575 }); // USA zöld / Német szürke
+    const skinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // Bőrszín
+    const bootMat = new THREE.MeshLambertMaterial({ color: 0x3d2314 }); // Bakancs
+    const helmetMat = new THREE.MeshLambertMaterial({ color: isAlly ? 0x2b3d22 : 0x3a4454 }); // Sisak
+    const weaponMat = new THREE.MeshLambertMaterial({ color: 0x111111 }); // Puska a kézbe
+
+    // 1. Törzs (Különálló has/mellkas)
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.2, 0.9), bodyMat);
+    torso.position.y = 2.5;
+    group.add(torso);
+
+    // 2. Fej és Sisak
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 8), skinMat);
+    head.position.y = 3.9;
+    group.add(head);
+    
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.52, 10, 10, 0, Math.PI*2, 0, Math.PI/2), helmetMat);
+    helmet.position.y = 3.95;
+    group.add(helmet);
+
+    // 3. Karok és a fegyver
+    const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.4, 0.35), bodyMat);
+    leftArm.position.set(-0.9, 2.7, 0.2);
+    leftArm.rotation.x = -Math.PI / 4;
+    group.add(leftArm);
+
+    const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.4, 0.35), bodyMat);
+    rightArm.position.set(0.9, 2.7, 0.2);
+    rightArm.rotation.x = -Math.PI / 3;
+    group.add(rightArm);
+
+    // Katonai puska a kézbe
+    const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 2.0), weaponMat);
+    rifle.position.set(0.4, 2.6, -0.6);
+    group.add(rifle);
+
+    // 4. Különálló LÁBAK az animációhoz (Ezek fognak külön mozogni!)
+    const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.5, 0.4), bodyMat);
+    leftLeg.position.set(-0.4, 0.75, 0);
+    group.add(leftLeg);
+
+    const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.5, 0.4), bodyMat);
+    rightLeg.position.set(0.4, 0.75, 0);
+    group.add(rightLeg);
+
+    // Bakancsok alulra
+    const lBoot = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.3, 0.6), bootMat);
+    lBoot.position.set(-0.4, 0.1, 0.1); group.add(lBoot);
+    const rBoot = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.3, 0.6), bootMat);
+    rBoot.position.set(0.4, 0.1, 0.1); group.add(rBoot);
+
+    return {
+        mainGroup: group,
+        leftLeg: leftLeg,
+        rightLeg: rightLeg,
+        leftBoot: lBoot,
+        rightBoot: rBoot
+    };
+}
+
+function maintainUnits() {
+    while (enemies3D.length < MAX_ENEMIES_ON_STAGE && totalEnemiesPool > enemies3D.length) {
+        let eObj = createHumanSoldierMesh(false);
+        let dist = 70 + Math.random() * 60; let angle = Math.random() * Math.PI * 2;
+        eObj.mainGroup.position.set(camera.position.x + Math.sin(angle)*dist, 0, camera.position.z + Math.cos(angle)*dist);
+        scene.add(eObj.mainGroup);
+        enemies3D.push({ meshGroup: eObj.mainGroup, legs: [eObj.leftLeg, eObj.rightLeg, eObj.leftBoot, eObj.rightBoot] });
+    }
+    while (allyNPCs.length < MAX_ALLIES_ON_STAGE && totalAlliesPool > allyNPCs.length) {
+        let aObj = createHumanSoldierMesh(true);
+        let dist = 15 + Math.random() * 25; let angle = Math.random() * Math.PI * 2;
+        aObj.mainGroup.position.set(camera.position.x + Math.sin(angle)*dist, 130, camera.position.z + Math.cos(angle)*dist);
+        scene.add(aObj.mainGroup);
+
+        let angleF = Math.random() * Math.PI * 2; let rad = 7 + Math.random()*6;
+        allyNPCs.push({ 
+            meshGroup: aObj.mainGroup, legs: [aObj.leftLeg, aObj.rightLeg, aObj.leftBoot, aObj.rightBoot],
+            phase: "AIRBORNE", y: 130, lastShot: 0, offX: Math.sin(angleF)*rad, offZ: Math.cos(angleF)*rad 
+        });
+    }
+    updateHUD3D();
+}
+
+function updateHUD3D() {
+    document.getElementById('hud-hp').innerText = Math.max(0, Math.floor(player.hp)) + "%";
+    document.getElementById('hud-allies-left').innerText = totalAlliesPool + " / 40";
+    document.getElementById('hud-enemies-left').innerText = totalEnemiesPool + " / 40";
+    document.getElementById('hud-wpn').innerText = weapons[player.currentWpn].name;
+    document.getElementById('hud-ammo').innerText = weapons[player.currentWpn].ammo + " / " + weapons[player.currentWpn].maxAmmo;
+}
+
+function triggerPlayerShot() {
+    let now = performance.now();
+    let wp = weapons[player.currentWpn];
+    if(now - lastShotTime >= wp.fireRate && wp.ammo > 0) {
+        wp.ammo--; lastShotTime = now; updateHUD3D();
+        muzzleFlashMesh.visible = true; setTimeout(() => muzzleFlashMesh.visible = false, 40);
+
+        for (let i = enemies3D.length - 1; i >= 0; i--) {
+            let enemy = enemies3D[i];
+            if(camera.position.distanceTo(enemy.meshGroup.position) < 95) { 
+                // Eltaláltuk az igazi embert, leesik a föld alá (meghal)
+                scene.remove(enemy.meshGroup);
+                enemies3D.splice(i, 1);
+                totalEnemiesPool--;
+                if(totalEnemiesPool <= 0) { alert("GYŐZELEM! Budapest utcái felszabadultak!"); location.reload(); }
+                maintainUnits();
+                break; 
+            }
+        }
+    }
+}
+
+function spawnBullet(from, to, isAlly) {
+    let b = new THREE.Mesh(new THREE.SphereGeometry(0.18, 4, 4), new THREE.MeshBasicMaterial({ color: isAlly ? 0x00f3ff : 0xff3333 }));
+    b.position.copy(from); b.position.y += 2.6;
+    let dir = new THREE.Vector3().subVectors(to, from).normalize();
+    scene.add(b);
+    projectiles.push({ mesh: b, direction: dir, isAlly: isAlly });
+}
+
+function animate3DGame() {
+    if (gameState !== "PLAYING") return;
+    requestAnimationFrame(animate3DGame);
+    globalTime += 0.15; // Az animációs idő mérése
+
+    // --- PARASUTÁS JÁTÉKOS FÁZIS ---
+    if (player.phase === "AIRBORNE") {
+        player.y -= 0.35; camera.position.y = player.y;
+        if (keys['w']) camera.position.z -= 0.7;
+        if (keys['s']) camera.position.z += 0.7;
+        if (keys['a']) camera.position.x -= 0.7;
+        if (keys['d']) camera.position.x += 0.7;
+        camera.rotation.x = -Math.PI / 8;
+
+        if (player.y <= 3) {
+            player.phase = "GROUND"; camera.rotation.x = 0; document.getElementById('crosshair').style.display = 'block';
+            updateHUD3D();
+        }
+    } 
+    // --- UTCAI MOZGÁS FÁZIS ---
+    else if (player.phase === "GROUND") {
+        let speed = 0.45;
+        if (keys['w']) { camera.position.x -= Math.sin(player.rotY) * speed; camera.position.z -= Math.cos(player.rotY) * speed; }
+        if (keys['s']) { camera.position.x += Math.sin(player.rotY) * speed; camera.position.z += Math.cos(player.rotY) * speed; }
+        if (keys['a']) { player.rotY += 0.04; camera.rotation.y = player.rotY; }
+        if (keys['d']) { player.rotY -= 0.04; camera.rotation.y = player.rotY; }
+
+        // Ellenség visszalő ránk a házak közül
+        if(Math.random() < 0.015 && enemies3D.length > 0) {
+            let randE = enemies3D[Math.floor(Math.random() * enemies3D.length)];
+            if(randE.meshGroup.position.distanceTo(camera.position) < 110) {
+                spawnBullet(randE.meshGroup.position, camera.position, false);
+            }
+        }
+    }
+
+    // --- IGAZI ELLENSÉGEK LÁBANIMÁCIÓJA (Mozgás szimulálása) ---
+    enemies3D.forEach(enemy => {
+        // Finoman forgolódnak és a játékos felé néznek a pesti házak közt
+        enemy.meshGroup.lookAt(camera.position.x, 0, camera.position.z);
+        
+        // Séta lábanimáció (Szinusz hullámmal váltakozva mozognak a combok és bakancsok)
+        let legSwing = Math.sin(globalTime * 1.2) * 0.4;
+        enemy.legs[0].rotation.x = legSwing;       // Bal comb
+        enemy.legs[2].rotation.x = legSwing;       // Bal bakancs
+        enemy.legs[1].rotation.x = -legSwing;      // Jobb comb
+        enemy.legs[3].rotation.x = -legSwing;      // Jobb bakancs
+    });
+
+    // --- SZÖVETSÉGES JÓ ARCOK LOGIKÁJA ---
+    let now = performance.now();
+    for (let a = allyNPCs.length - 1; a >= 0; a--) {
+        let ally = allyNPCs[a];
+        if (ally.phase === "AIRBORNE") {
+            ally.y -= 0.35; ally.meshGroup.position.y = ally.y;
+            if(ally.y <= 0) { ally.phase = "GROUND"; ally.meshGroup.position.y = 0; }
+        } else {
+            // Követési pozíció kiszámítása
+            let tX = camera.position.x + (Math.cos(player.rotY) * ally.offX - Math.sin(player.rotY) * ally.offZ);
+            let tZ = camera.position.z + (Math.sin(player.rotY) * ally.offX + Math.cos(player.rotY) * ally.offZ);
+            
+            // Ha messze vannak, lépkednek feléd
+            let distToTarget = Math.hypot(tX - ally.meshGroup.position.x, tZ - ally.meshGroup.position.z);
+            if(distToTarget > 2) {
+                ally.meshGroup.position.x += (tX - ally.meshGroup.position.x) * 0.03;
+                ally.meshGroup.position.z += (tZ - ally.meshGroup.position.z) * 0.03;
+                
+                // Séta animáció nekik is, ha haladnak
+                let legSwing = Math.sin(globalTime * 1.5) * 0.4;
+                ally.legs[0].rotation.x = legSwing;
+                ally.legs[2].rotation.x = legSwing;
+                ally.legs[1].rotation.x = -legSwing;
+                ally.legs[3].rotation.x = -legSwing;
+            }
+            ally.meshGroup.lookAt(camera.position.x - Math.sin(player.rotY)*30, 0, camera.position.z - Math.cos(player.rotY)*30);
+
+            // Lövöldözés az igazi német katonákra
+            if (enemies3D.length > 0 && now - ally.lastShot > (500 + Math.random() * 400)) {
+                let targetE = enemies3D[Math.floor(Math.random() * enemies3D.length)];
+                if(targetE && ally.meshGroup.position.distanceTo(targetE.meshGroup.position) < 90) {
+                    spawnBullet(ally.meshGroup.position, targetE.meshGroup.position, true);
+                    ally.lastShot = now;
+                    
+                    // Ellenség kiiktatása
+                    scene.remove(targetE.meshGroup);
+                    enemies3D = enemies3D.filter(e => e !== targetE);
+                    totalEnemiesPool--;
+                    if(totalEnemiesPool <= 0) { alert("DICSŐSÉG! Tisztára söpörtétek a pesti utcákat!"); location.reload(); }
+                    maintainUnits();
+                }
+            }
+        }
+    }
+
+    // --- GOLYÓK UTÁNKÖVETÉSE ÉS SEBZÉSEK ---
+    for(let p = projectiles.length - 1; p >= 0; p--) {
+        let proj = projectiles[p];
+        proj.mesh.position.addScaledVector(proj.direction, 1.6);
+
+        if (!proj.isAlly) {
+            // Játékost éri találat
+            if(proj.mesh.position.distanceTo(camera.position) < 2.5) {
+                player.hp -= 7; updateHUD3D();
+                scene.remove(proj.mesh); projectiles.splice(p, 1);
+                if(player.hp <= 0) { alert("ELESETT A BUDAPESTI CSATÁBAN!"); location.reload(); }
+                continue;
+            }
+            // Szövetséges embert ér találat
+            for(let a = allyNPCs.length - 1; a >= 0; a--) {
+                let ally = allyNPCs[a];
+                if(proj.mesh.position.distanceTo(ally.meshGroup.position) < 2.5 && ally.phase === "GROUND") {
+                    scene.remove(ally.meshGroup);
+                    allyNPCs.splice(a, 1);
+                    totalAlliesPool--;
+                    scene.remove(proj.mesh); projectiles.splice(p, 1);
+                    if(totalAlliesPool <= 0) { alert("VERESÉG! A pesti hadosztályod teljesen felőrlődött."); location.reload(); }
+                    maintainUnits();
+                    break;
+                }
+            }
+        } else {
+            // Túl messzire repülő golyók törlése
+            if(proj.mesh.position.length() > 600) { scene.remove(proj.mesh); projectiles.splice(p, 1); }
+        }
+    }
+
+    renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
