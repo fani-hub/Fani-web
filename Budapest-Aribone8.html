@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Medal of Honor: Budapest Airborne 3D — PRO VERZIÓ</title>
+    <style>
+        body {
+            margin: 0; background-color: #0b0c10; color: #c5c6c7;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            min-height: 100vh; overflow: hidden; user-select: none; touch-action: none;
+        }
+        #game-container {
+            position: relative; width: 100%; max-width: 950px; height: 650px;
+            border: 4px solid #1f2833; background-color: #000;
+            box-shadow: 0 0 50px rgba(0,0,0,0.9); border-radius: 8px;
+        }
+        #briefing-screen {
+            position: absolute; width: 100%; height: 100%;
+            background: radial-gradient(#1f2833, #0b0c10);
+            padding: 30px; box-sizing: border-box;
+            display: flex; flex-direction: column; justify-content: space-between; z-index: 10;
+        }
+        .briefing-header { text-align: center; border-bottom: 2px solid #45f3ff; color: #fff; padding-bottom: 10px; }
+        .briefing-header h1 { margin: 5px 0; letter-spacing: 2px; text-shadow: 2px 2px #000; font-size: 26px; color: #45f3ff; }
+        .briefing-main { display: flex; gap: 20px; flex: 1; margin: 20px 0; overflow: hidden; }
+        .briefing-text {
+            flex: 1; background: rgba(0, 0, 0, 0.85); border: 1px solid #1f2833;
+            padding: 20px; overflow-y: auto; font-size: 13px; line-height: 1.6; border-radius: 4px;
+        }
+        .briefing-sidebar { width: 260px; display: flex; flex-direction: column; gap: 15px; }
+        .form-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 11px; color: #45f3ff; font-weight: bold; text-transform: uppercase; }
+        select, button {
+            width: 100%; background: #1f2833; color: #fff; border: 1px solid #45f3ff;
+            padding: 10px; font-family: inherit; font-size: 13px; cursor: pointer; border-radius: 4px;
+        }
+        #start-btn { 
+            background: #66fcf1; color: #0b0c10; font-weight: bold; font-size: 16px; padding: 15px; 
+            border: none; box-shadow: 0 0 15px rgba(102,252,241,0.4); letter-spacing: 1px;
+        }
+        #start-btn:hover { background: #45e3d7; cursor: pointer; }
+        
+        #three-canvas-container { width: 100%; height: 100%; }
+        #hud {
+            position: absolute; bottom: 0; width: 100%; 
+            background: rgba(11, 12, 16, 0.95);
+            border-top: 2px solid #1f2833; display: none; justify-content: space-between;
+            padding: 12px 25px; box-sizing: border-box; font-weight: bold; z-index: 5;
+        }
+        .hud-sector { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+        .hud-label { font-size: 10px; color: #66fcf1; text-transform: uppercase; }
+        .hud-val { color: #fff; font-size: 16px; }
+        
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 24px; height: 24px; pointer-events: none; display: none; z-index: 4;
+        }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #45f3ff; }
+        #crosshair::before { top: 11px; left: 0; width: 24px; height: 2px; }
+        #crosshair::after { top: 0; left: 11px; width: 2px; height: 24px; }
+
+        /* 📱 JAVÍTOTT MOBIL TOUCH JOYSTICK ÉS LÖVŐGOMB */
+        #mobile-hud {
+            display: none; position: absolute; bottom: 30px; width: 100%;
+            justify-content: space-between; padding: 0 40px; box-sizing: border-box;
+            pointer-events: none; z-index: 6;
+        }
+        #v-joystick-zone {
+            width: 110px; height: 110px; background: rgba(255,255,255,0.1);
+            border: 2px dashed #66fcf1; border-radius: 50%; position: relative; pointer-events: auto;
+        }
+        #v-joystick-stick {
+            width: 45px; height: 45px; background: #66fcf1; border-radius: 50%;
+            position: absolute; top: 32px; left: 32px; box-shadow: 0 0 10px #66fcf1;
+        }
+        #v-fire-btn {
+            width: 90px; height: 90px; background: rgba(255, 77, 77, 0.6);
+            border: 3px solid #ff4d4d; border-radius: 50%; color: white;
+            font-weight: bold; font-size: 16px; display: flex; justify-content: center;
+            align-items: center; pointer-events: auto; cursor: pointer; box-shadow: 0 0 15px rgba(255,77,77,0.4);
+        }
+        #height-alert {
+            position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
+            background: rgba(102, 252, 241, 0.85); color: #0b0c10; padding: 8px 16px;
+            font-weight: bold; border-radius: 4px; display: none; z-index: 6; font-size: 14px;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="height-alert">EJTŐERNYŐS DESZANT: IRÁNYÍTSD AZ ERNYŐT A WASD-VEL VAGY A JOYSTICKKAL!</div>
+
+    <div id="briefing-screen">
+        <div class="briefing-header">
+            <h1>MEDAL OF Honor: BUDAPEST AIRBORNE</h1>
+            <p>TELJES MECHANIKÁS KIADÁS — LÁNCHÍD & VALÓDI KATONÁK</p>
+        </div>
+        <div class="briefing-main">
+            <div class="briefing-text">
+                <strong>HADSEREG UTASÍTÁS:</strong><br><br>
+                Megérkezett a teljes, javított szimuláció, nincsenek többé sörösüveg alakú bábuk és nincsenek elrontott irányítások!<br><br>
+                * <strong>Rendes Egérirányítás:</strong> Az egér forgatása javítva lett, természetes, nem fordított FPS nézet működik PC-n.<br>
+                * <strong>Rendes Mobil Vezérlés:</strong> Gombok helyett egy modern virtuális joystickot kapsz a bal oldalra a mozgáshoz, és egy nagy piros gombot a lövéshez!<br>
+                * <strong>Valódi Katonák:</strong> Minden szövetséges és német katona saját végtagokkal bír, amelyek lépkednek mozgás közben, és puskát fognak a kezükben.<br>
+                * <strong>A Budapesti Utcakép:</strong> A pálya szívében ott áll a monumentális kőből épült Lánchíd a nagy kapupilonjaival, körülötte pedig tetővel és ablakokkal ellátott bérházak magasodnak.<br>
+                * <strong>Zöld Jelzőfüst:</strong> Egy hatalmas, fentről is jól látható zöld füstoszlop mutatja a biztonságos landolási zónát. Navigálj oda zuhanás közben a bónusz munícióért!<br><br>
+                <strong>PC JÁTÉKHOZ:</strong> Kattints az indítás gombra, majd kattints a 3D képbe a nézelődés aktiválásához!
+            </div>
+            <div class="briefing-sidebar">
+                <div class="form-group">
+                    <label>Helyszín</label>
+                    <select id="mission-select">
+                        <option value="lanchid_ostrom">Budapest — A Lánchíd ostroma</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Nehézségi Szint</label>
+                    <select id="difficulty-select">
+                        <option value="easy">Kezdő (EASY)</option>
+                        <option value="medium" selected>Közepes (MEDIUM)</option>
+                        <option value="hard">Veterán (HARD)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Fegyverzet</label>
+                    <select id="weapon-select">
+                        <option value="0">Thompson M1A1 (Géppisztoly)</option>
+                        <option value="1">M1 Garand (Félautomata Puska)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <button id="start-btn">UGRÁS A KÉK ÉGBŐL BUDAPESTRE</button>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="three-canvas-container"></div>
+    
+    <div id="hud">
+        <div class="hud-sector"><span class="hud-label">ÉLETERŐ</span><span id="hud-hp" class="hud-val">100%</span></div>
+        <div class="hud-sector"><span class="hud-label">SZÖVETSÉGESEK (USA)</span><span id="hud-allies-left" style="color:#66fcf1;" class="hud-val">40 / 40</span></div>
+        <div class="hud-sector"><span class="hud-label">ELLENSÉG (GER)</span><span id="hud-enemies-left" style="color:#ff4d4d;" class="hud-val">40 / 40</span></div>
+        <div class="hud-sector"><span class="hud-label">FEGYVER</span><span id="hud-wpn" class="hud-val">-</span></div>
+        <div class="hud-sector"><span class="hud-label">LŐSZER</span><span id="hud-ammo" class="hud-val">-</span></div>
+    </div>
+
+    <div id="mobile-hud">
+        <div id="v-joystick-zone">
+            <div id="v-joystick-stick"></div>
+        </div>
+        <div id="v-fire-btn">TŰZ</div>
+    </div>
+</div>
+
+<script>
+let scene, camera, renderer;
+let gameState = "BRIEFING";
+let diffLevel = "medium";
+
+let totalAlliesPool = 40;
+let totalEnemiesPool = 40;
+const MAX_ALLIES_ON_STAGE = 7;
+const MAX_ENEMIES_ON_STAGE = 9;
+
+// Kamera forgatási szögek (A javított, nem fordított nézelődéshez!)
+let yaw = 0, pitch = 0;
+
+let player = { phase: "AIRBORNE", x: 0, z: 90, y: 150, hp: 100, maxHp: 100, currentWpn: 0 };
+let weapons = [
+    { name: "Thompson M1A1", ammo: 90, maxAmmo: 90, dmg: 35, fireRate: 130 },
+    { name: "M1 Garand", ammo: 32, maxAmmo: 32, dmg: 80, fireRate: 350 }
+];
+
+let keys = {};
+let enemies3D = [];
+let allyNPCs = []; 
+let projectiles = []; 
+let greenSmokeParts = [];
+let isMobile = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+let gunGroup, muzzleFlashMesh;
+let lastShotTime = 0;
+let globalTime = 0;
+let targetSmokePos = new THREE.Vector3(15, 0, -30); // Zöld füst helye
+
+// Joystick adatok mobilos irányításhoz
+let joystickActive = false;
+let joystickStart = { x: 0, y: 0 };
+let joystickMove = { x: 0, y: 0 };
+
+function createHouseTexture() {
+    const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#52433d'; ctx.fillRect(0, 0, 128, 128); // Régi pesti barna téglafal
+    ctx.fillStyle = '#ffea85'; // Ablakok sárga fénye
+    for(let y=12; y<120; y+=32) {
+        for(let x=15; x<120; x+=26) {
+            if(Math.random() > 0.25) ctx.fillRect(x, y, 10, 16);
+        }
+    }
+    return new THREE.CanvasTexture(canvas);
+}
+
+document.getElementById('start-btn').addEventListener('click', () => {
+    diffLevel = document.getElementById('difficulty-select').value;
+    if(diffLevel === "easy") { player.hp = 150; player.maxHp = 150; }
+    if(diffLevel === "medium") { player.hp = 100; player.maxHp = 100; }
+    if(diffLevel === "hard") { player.hp = 75; player.maxHp = 75; }
+
+    player.currentWpn = parseInt(document.getElementById('weapon-select').value);
+    document.getElementById('briefing-screen').style.display = 'none';
+    document.getElementById('hud').style.display = 'flex';
+    document.getElementById('height-alert').style.display = 'block';
+    
+    if(isMobile) {
+        document.getElementById('mobile-hud').style.display = 'flex';
+        setupMobileJoystick();
+    }
+    
+    init3DGame();
+});
+
+function init3DGame() {
+    gameState = "PLAYING";
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x6ba2f7); // Tiszta kék háborús égbolt
+    scene.fog = new THREE.FogExp2(0x6ba2f7, 0.005);
+
+    camera = new THREE.PerspectiveCamera(60, document.getElementById('game-container').clientWidth / 650, 0.1, 1000);
+    camera.position.set(player.x, player.y, player.z);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(document.getElementById('game-container').clientWidth, 650);
+    document.getElementById('three-canvas-container').appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0x888888));
+    const sun = new THREE.DirectionalLight(0xfff5db, 1.2); sun.position.set(60, 140, 40); scene.add(sun);
+
+    // Óriási pesti flaszter talaj
+    const floorGeo = new THREE.PlaneGeometry(1600, 1600);
+    const floorMat = new THREE.MeshLambertMaterial({ color: 0x36393f });
+    const floor = new THREE.Mesh(floorGeo, floorMat); floor.rotation.x = -Math.PI / 2; scene.add(floor);
+
+    // 🌉 BUDAPESTI LÁNCHÍD GENERÁLÁSA
+    const bridgeGroup = new THREE.Group();
+    const stoneMat = new THREE.MeshLambertMaterial({ color: 0x616770 }); // Szürke kőfaragás
+    
+    // Híd teste
+    const road = new THREE.Mesh(new THREE.BoxGeometry(22, 3, 240), stoneMat);
+    road.position.set(0, 4, 0); bridgeGroup.add(road);
+    
+    // Pilon kapuk, amin át lehet futni
+    for(let zOffset of [-70, 70]) {
+        let pilon = new THREE.Group();
+        let legL = new THREE.Mesh(new THREE.BoxGeometry(4, 38, 7), stoneMat); legL.position.set(-9, 19, 0); pilon.add(legL);
+        let legR = new THREE.Mesh(new THREE.BoxGeometry(4, 38, 7), stoneMat); legR.position.set(9, 19, 0); pilon.add(legR);
+        let arch = new THREE.Mesh(new THREE.BoxGeometry(22, 6, 7), stoneMat); arch.position.set(0, 35, 0); pilon.add(arch);
+        pilon.position.set(0, 0, zOffset);
+        bridgeGroup.add(pilon);
+    }
+    bridgeGroup.position.set(-45, 0, 10);
+    scene.add(bridgeGroup);
+
+    // 🏙️ PESTI BÉRHÁZAK TETŐVEL
+    const houseTex = createHouseTexture();
+    const bérházMat = new THREE.MeshLambertMaterial({ map: houseTex });
+    const roofMat = new THREE.MeshLambertMaterial({ color: 0xa84334 }); // Cseréptető
+
+    for(let i=0; i<60; i++) {
+        let hX = Math.random() * 550 - 275;
+        let hZ = Math.random() * 550 - 275;
+        
+        if(Math.hypot(hX - (-45), hZ) > 40 && Math.hypot(hX - targetSmokePos.x, hZ - targetSmokePos.z) > 25) {
+            let houseGroup = new THREE.Group();
+            let body = new THREE.Mesh(new THREE.BoxGeometry(34, 64, 34), bérházMat);
+            body.position.y = 32; houseGroup.add(body);
+            
+            let roof = new THREE.Mesh(new THREE.ConeGeometry(25, 14, 4), roofMat);
+            roof.position.y = 71; roof.rotation.y = Math.PI/4; houseGroup.add(roof);
+            
+            houseGroup.position.set(hX, 0, hZ);
+            scene.add(houseGroup);
+        }
+    }
+
+    // 🟢 MAGAS ZÖLD JELZŐFÜST OSZLOP (MOH stílus)
+    for (let h = 0; h < 30; h++) {
+        let smokePart = new THREE.Mesh(
+            new THREE.SphereGeometry(2 + h * 0.15, 6, 6), 
+            new THREE.MeshBasicMaterial({ color: 0x2ec4b6, transparent: true, opacity: 0.5 - (h * 0.015) })
+        );
+        smokePart.position.set(targetSmokePos.x, h * 4.5, targetSmokePos.z);
+        scene.add(smokePart);
+        greenSmokeParts.push(smokePart);
+    }
+
+    // FPS Fegyver modell a képernyőre
+    gunGroup = new THREE.Group();
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.4, 8), new THREE.MeshStandardMaterial({ color: 0x222629, metalness: 0.8 }));
+    barrel.rotation.x = Math.PI / 2; gunGroup.add(barrel);
+    muzzleFlashMesh = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 8), new THREE.MeshBasicMaterial({ color: 0xffea00, transparent: true, opacity: 0.9 }));
+    muzzleFlashMesh.rotation.x = -Math.PI / 2; muzzleFlashMesh.position.set(0, 0, -1.4); muzzleFlashMesh.visible = false; gunGroup.add(muzzleFlashMesh);
+    gunGroup.position.set(0.35, -0.35, -1.1); camera.add(gunGroup); scene.add(camera);
+    gunGroup.visible = false; 
+
+    maintainUnits();
+
+    // INPUTOK REAKCIÓJA
+    window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+    window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+    
+    // 🖱️ FIXÁLT EGÉRMOZGÁS — Nem fordított, tökéletes 3D FPS nézelődés fentről lefelé is!
+    window.addEventListener('mousemove', e => {
+        if (gameState === "PLAYING" && (!isMobile || document.pointerLockElement)) {
+            yaw -= e.movementX * 0.0035;
+            pitch -= e.movementY * 0.0035;
+            pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitch));
+            
+            camera.rotation.set(0, 0, 0);
+            camera.rotation.y = yaw;
+            camera.rotation.x = pitch;
+        }
+    });
+
+    // Érintéses nézelődés mobilra (a joystickon kívül eső területen)
+    if(isMobile) {
+        window.addEventListener('touchmove', e => {
+            if(e.touches.length === 1 && !joystickActive) {
+                let touch = e.touches[0];
+                // Egyszerűsített swipe nézet forgatás mobilra
+                yaw -= (touch.clientX - (window.innerWidth/2)) * 0.0001;
+                camera.rotation.y = yaw;
+            }
+        });
+        document.getElementById('v-fire-btn').addEventListener('touchstart', () => {
+            if(player.phase === "GROUND") triggerPlayerShot();
+        });
+    }
+
+    document.getElementById('three-canvas-container').addEventListener('mousedown', () => { 
+        if(!isMobile) document.body.requestPointerLock();
+        if(player.phase === "GROUND" && gameState === "PLAYING") triggerPlayerShot(); 
+    });
+
+    updateHUD3D();
+    animate3DGame();
+}
+
+// MOBIL JOYSTICK LOGIKA
+function setupMobileJoystick() {
+    const zone = document.getElementById('v-joystick-zone');
+    const stick = document.getElementById('v-joystick-stick');
+    
+    zone.addEventListener('touchstart', e => {
+        joystickActive = true;
+        const t = e.touches[0];
+        joystickStart = { x: t.clientX, y: t.clientY };
+    });
+    
+    zone.addEventListener('touchmove', e => {
+        if(!joystickActive) return;
+        const t = e.touches[0];
+        let dX = t.clientX - joystickStart.x;
+        let dY = t.clientY - joystickStart.y;
+        let dist = Math.hypot(dX, dY);
+        if(dist > 35) { dX *= 35/dist; dY *= 35/dist; dist = 35; }
+        
+        stick.style.transform = `translate(${dX}px, ${dY}px)`;
+        joystickMove = { x: dX / 35, y: dY / 35 };
+    });
+    
+    zone.addEventListener('touchend', () => {
+        joystickActive = false;
+        stick.style.transform = 'translate(0px, 0px)';
+        joystickMove = { x: 0, y: 0 };
+    });
+}
+
+// 🧍 IGAZI KATONA LÉTREHOZÁSA (Végtagokkal, puskával)
+function createHumanSoldierMesh(isAlly) {
+    const group = new THREE.Group();
+    const bodyMat = new THREE.MeshLambertMaterial({ color: isAlly ? 0x386641 : 0x4a5568 }); 
+    const skinMat = new THREE.MeshLambertMaterial({ color: 0xfbd38d }); 
+    const bootMat = new THREE.MeshLambertMaterial({ color: 0x1a202c }); 
+    const helmetMat = new THREE.MeshLambertMaterial({ color: isAlly ? 0x1e4620 : 0x2d3748 }); 
+
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.3, 0.9), bodyMat); torso.position.y = 2.5; group.add(torso);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 8), skinMat); head.position.y = 3.9; group.add(head);
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.53, 10, 10, 0, Math.PI*2, 0, Math.PI/2), helmetMat); helmet.position.y = 3.96; group.add(helmet);
+
+    const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.4, 0.35), bodyMat); leftArm.position.set(-0.9, 2.7, 0.2); leftArm.rotation.x = -Math.PI/4; group.add(leftArm);
+    const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.4, 0.35), bodyMat); rightArm.position.set(0.9, 2.7, 0.2); rightArm.rotation.x = -Math.PI/3; group.add(rightArm);
+    
+    const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 2.0), new THREE.MeshLambertMaterial({ color: 0x111111 })); 
+    rifle.position.set(0.4, 2.5, -0.6); group.add(rifle);
+
+    const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.5, 0.4), bodyMat); leftLeg.position.set(-0.4, 0.75, 0); group.add(leftLeg);
+    const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.5, 0.4), bodyMat); rightLeg.position.set(0.4, 0.75, 0); group.add(rightLeg);
+    
+    const lBoot = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.3, 0.6), bootMat); lBoot.position.set(-0.4, 0.1, 0.1); group.add(lBoot);
+    const rBoot = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.3, 0.6), bootMat); rBoot.position.set(0.4, 0.1, 0.1); group.add(rBoot);
+
+    return { mainGroup: group, legs: [leftLeg, rightLeg, lBoot, rBoot] };
+}
+
+function maintainUnits() {
+    while (enemies3D.length < MAX_ENEMIES_ON_STAGE && totalEnemiesPool > enemies3D.length) {
+        let eObj = createHumanSoldierMesh(false);
+        let dist = 65 + Math.random() * 75; let angle = Math.random() * Math.PI * 2;
+        eObj.mainGroup.position.set(camera.position.x + Math.sin(angle)*dist, 0, camera.position.z + Math.cos(angle)*dist);
+        scene.add(eObj.mainGroup);
+        enemies3D.push({ meshGroup: eObj.mainGroup, legs: eObj.legs });
+    }
+    while (allyNPCs.length < MAX_ALLIES_ON_STAGE && totalAlliesPool > allyNPCs.length) {
+        let aObj = createHumanSoldierMesh(true);
+        let dist = 20 + Math.random() * 25; let angle = Math.random() * Math.PI * 2;
+        aObj.mainGroup.position.set(camera.position.x + Math.sin(angle)*dist, 130, camera.position.z + Math.cos(angle)*dist);
+        scene.add(aObj.mainGroup);
+
+        let angleF = Math.random() * Math.PI * 2; let rad = 8 + Math.random()*6;
+        allyNPCs.push({ 
+            meshGroup: aObj.mainGroup, legs: aObj.legs,
+            phase: "AIRBORNE", y: 130, lastShot: 0, offX: Math.sin(angleF)*rad, offZ: Math.cos(angleF)*rad 
+        });
+    }
+    updateHUD3D();
+}
+
+function updateHUD3D() {
+    document.getElementById('hud-hp').innerText = Math.max(0, Math.floor(player.hp)) + "%";
+    document.getElementById('hud-allies-left').innerText = totalAlliesPool + " / 40";
+    document.getElementById('hud-enemies-left').innerText = totalEnemiesPool + " / 40";
+    document.getElementById('hud-wpn').innerText = weapons[player.currentWpn].name;
+    document.getElementById('hud-ammo').innerText = weapons[player.currentWpn].ammo + " / " + weapons[player.currentWpn].maxAmmo;
+}
+
+function triggerPlayerShot() {
+    let now = performance.now();
+    let wp = weapons[player.currentWpn];
+    if(now - lastShotTime >= wp.fireRate && wp.ammo > 0) {
+        wp.ammo--; lastShotTime = now; updateHUD3D();
+        muzzleFlashMesh.visible = true; setTimeout(() => muzzleFlashMesh.visible = false, 40);
+
+        for (let i = enemies3D.length - 1; i >= 0; i--) {
+            let enemy = enemies3D[i];
+            if(camera.position.distanceTo(enemy.meshGroup.position) < 90) { 
+                scene.remove(enemy.meshGroup);
+                enemies3D.splice(i, 1);
+                totalEnemiesPool--;
+                if(totalEnemiesPool <= 0) { alert("DICSŐSÉG! Megtisztítottátok a Lánchidat a megszállóktól!"); location.reload(); }
+                maintainUnits();
+                break; 
+            }
+        }
+    }
+}
+
+function spawnBullet(from, to, isAlly) {
+    let b = new THREE.Mesh(new THREE.SphereGeometry(0.18, 4, 4), new THREE.MeshBasicMaterial({ color: isAlly ? 0x66fcf1 : 0xff4d4d }));
+    b.position.copy(from); b.position.y += 2.5;
+    let dir = new THREE.Vector3().subVectors(to, from).normalize();
+    scene.add(b);
+    projectiles.push({ mesh: b, direction: dir, isAlly: isAlly });
+}
+
+function animate3DGame() {
+    if (gameState !== "PLAYING") return;
+    requestAnimationFrame(animate3DGame);
+    globalTime += 0.16;
+
+    // Füstoszlop mozgatása
+    greenSmokeParts.forEach((p, idx) => {
+        p.position.x = targetSmokePos.x + Math.sin(globalTime * 0.4 + idx) * 0.3;
+    });
+
+    // Kiszámítjuk a mozgásvektorokat a billentyűzet és a mobil joystick alapján
+    let moveX = 0;
+    let moveZ = 0;
+    
+    if (keys['w']) moveZ = -1;
+    if (keys['s']) moveZ = 1;
+    if (keys['a']) moveX = -1;
+    if (keys['d']) moveX = 1;
+    
+    if (joystickActive) {
+        moveX = joystickMove.x;
+        moveZ = joystickMove.y;
+    }
+
+    // 🪂 --- 1. EJTŐERNYŐS DROP FÁZIS ---
+    if (player.phase === "AIRBORNE") {
+        player.y -= 0.35; 
+        
+        let airSpeed = 0.55;
+        // Kormányzás a nézési yaw szög alapján, teljesen szabad 3D mozgás zuhanáskor!
+        if (moveZ < 0) { player.x -= Math.sin(yaw) * airSpeed; player.z -= Math.cos(yaw) * airSpeed; }
+        if (moveZ > 0) { player.x += Math.sin(yaw) * airSpeed; player.z += Math.cos(yaw) * airSpeed; }
+        if (moveX < 0) { player.x -= Math.cos(yaw) * airSpeed; player.z += Math.sin(yaw) * airSpeed; }
+        if (moveX > 0) { player.x += Math.cos(yaw) * airSpeed; player.z -= Math.sin(yaw) * airSpeed; }
+
+        camera.position.set(player.x, player.y, player.z);
+
+        if (player.y <= 3.5) {
+            player.phase = "GROUND";
+            document.getElementById('height-alert').style.display = 'none';
+            document.getElementById('crosshair').style.display = 'block';
+            gunGroup.visible = true; 
+
+            // Landolás értékelése a zöld füst távolságában
+            let distToSmoke = Math.hypot(player.x - targetSmokePos.x, player.z - targetSmokePos.z);
+            if(distToSmoke < 22) {
+                weapons.forEach(w => w.ammo = w.maxAmmo);
+                alert("STRATÉGIAI TALÁLAT! Biztonságos landolás a zöld füstben, lőszerkészletek feltöltve!");
+            } else {
+                player.hp -= 20;
+                alert("KOCKÁZATOS ÉRKEZÉS! Elhibáztad a füstöt, a pesti bérházak közé estél!");
+            }
+            updateHUD3D();
+        }
+    } 
+    // 🪖 --- 2. VALÓDI UTCAI HARC FÁZIS ---
+    else if (player.phase === "GROUND") {
+        let speed = 0.48;
+        if (moveZ < 0) { player.x -= Math.sin(yaw) * speed; player.z -= Math.cos(yaw) * speed; }
+        if (moveZ > 0) { player.x += Math.sin(yaw) * speed; player.z += Math.cos(yaw) * speed; }
+        if (moveX < 0) { player.x -= Math.cos(yaw) * speed; player.z += Math.sin(yaw) * speed; }
+        if (moveX > 0) { player.x += Math.cos(yaw) * speed; player.z -= Math.sin(yaw) * speed; }
+
+        camera.position.set(player.x, 3.5, player.z);
+
+        // Ellenséges katonák visszalőnek rád a házak fedezékéből
+        if(Math.random() < 0.018 && enemies3D.length > 0) {
+            let randE = enemies3D[Math.floor(Math.random() * enemies3D.length)];
+            if(randE.meshGroup.position.distanceTo(camera.position) < 110) {
+                spawnBullet(randE.meshGroup.position, camera.position, false);
+            }
+        }
+    }
+
+    // NÉMET KATONÁK FORGATÁSA ÉS LÉPTETÉSE
+    enemies3D.forEach(enemy => {
+        enemy.meshGroup.lookAt(player.x, 0, player.z);
+        let legSwing = Math.sin(globalTime * 1.3) * 0.45;
+        enemy.legs[0].rotation.x = legSwing;
+        enemy.legs[2].rotation.x = legSwing;
+        enemy.legs[1].rotation.x = -legSwing;
+        enemy.legs[3].rotation.x = -legSwing;
+    });
+
+    // SZÖVETSÉGES PARASUTÁSOK TARTALMA ÉS TAKTIKÁJA
+    let now = performance.now();
+    for (let a = allyNPCs.length - 1; a >= 0; a--) {
+        let ally = allyNPCs[a];
+        if (ally.phase === "AIRBORNE") {
+            ally.y -= 0.35; ally.meshGroup.position.y = ally.y;
+            if(ally.y <= 0) { ally.phase = "GROUND"; ally.meshGroup.position.y = 0; }
+        } else {
+            // Követési és hadrendi pozíciók a játékos mellett a fronton
+            let tX = player.x + (Math.cos(yaw) * ally.offX - Math.sin(yaw) * ally.offZ);
+            let tZ = player.z + (Math.sin(yaw) * ally.offX + Math.cos(yaw) * ally.offZ);
+            
+            let dist = Math.hypot(tX - ally.meshGroup.position.x, tZ - ally.meshGroup.position.z);
+            if(dist > 2.8) {
+                ally.meshGroup.position.x += (tX - ally.meshGroup.position.x) * 0.035;
+                ally.meshGroup.position.z += (tZ - ally.meshGroup.position.z) * 0.035;
+                
+                let legSwing = Math.sin(globalTime * 1.5) * 0.45;
+                ally.legs[0].rotation.x = legSwing; ally.legs[2].rotation.x = legSwing;
+                ally.legs[1].rotation.x = -legSwing; ally.legs[3].rotation.x = -legSwing;
+            }
+            ally.meshGroup.lookAt(player.x - Math.sin(yaw)*20, 0, player.z - Math.cos(yaw)*20);
+
+            // Szövetségesek önállóan támadják a német egységeket
+            if (enemies3D.length > 0 && now - ally.lastShot > (500 + Math.random() * 500)) {
+                let targetE = enemies3D[Math.floor(Math.random() * enemies3D.length)];
+                if(targetE && ally.meshGroup.position.distanceTo(targetE.meshGroup.position) < 90) {
+                    spawnBullet(ally.meshGroup.position, targetE.meshGroup.position, true);
+                    ally.lastShot = now;
+                    
+                    scene.remove(targetE.meshGroup);
+                    enemies3D = enemies3D.filter(e => e !== targetE);
+                    totalEnemiesPool--;
+                    if(totalEnemiesPool <= 0) { alert("DICSŐSÉG! Megtisztítottátok Budapest utcáit!"); location.reload(); }
+                    maintainUnits();
+                }
+            }
+        }
+    }
+
+    // PROJEKTILEK ÉS SEBZÉSEK UTÁNKÖVETÉSE
+    for(let p = projectiles.length - 1; p >= 0; p--) {
+        let proj = projectiles[p];
+        proj.mesh.position.addScaledVector(proj.direction, 1.75);
+
+        if (!proj.isAlly) {
+            if(proj.mesh.position.distanceTo(camera.position) < 2.5 && player.phase === "GROUND") {
+                player.hp -= 8; updateHUD3D();
+                scene.remove(proj.mesh); projectiles.splice(p, 1);
+                if(player.hp <= 0) { alert("ELESETT A BUDAPESTI CSATÁBAN!"); location.reload(); }
+                continue;
+            }
+            for(let a = allyNPCs.length - 1; a >= 0; a--) {
+                let ally = allyNPCs[a];
+                if(proj.mesh.position.distanceTo(ally.meshGroup.position) < 2.5 && ally.phase === "GROUND") {
+                    scene.remove(ally.meshGroup);
+                    allyNPCs.splice(a, 1);
+                    totalAlliesPool--;
+                    scene.remove(proj.mesh); projectiles.splice(p, 1);
+                    if(totalAlliesPool <= 0) { alert("A SZÖVETSÉGES HADOSZTÁLYTELJESEN FELŐRLŐDÖTT!"); location.reload(); }
+                    maintainUnits();
+                    break;
+                }
+            }
+        } else {
+            if(proj.mesh.position.length() > 650) { scene.remove(proj.mesh); projectiles.splice(p, 1); }
+        }
+    }
+
+    renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
