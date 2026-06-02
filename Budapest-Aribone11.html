@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medal of Honor: Budapest Frontline — REAL PARLAMENT & DUNA</title>
+    <style>
+        body {
+            margin: 0; background-color: #1a202c; color: #fff;
+            font-family: 'Arial', sans-serif; overflow: hidden; user-select: none;
+        }
+        #game-container { position: relative; width: 100vw; height: 100vh; background-color: #87CEEB; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 20px; height: 20px; pointer-events: none; z-index: 10;
+        }
+        #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #ff3333; }
+        #crosshair::before { top: 9px; left: 0; width: 20px; height: 2px; }
+        #crosshair::after { top: 0; left: 9px; width: 2px; height: 20px; }
+        
+        #radar {
+            position: absolute; top: 20px; right: 20px; width: 150px; height: 150px;
+            background: rgba(0, 40, 20, 0.75); border: 3px solid #22c55e; border-radius: 50%; z-index: 10;
+        }
+        #hud {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); padding: 15px 40px; border-radius: 10px;
+            display: flex; gap: 40px; font-weight: bold; font-size: 18px; z-index: 10; border: 2px solid #fff;
+        }
+        #intro {
+            position: absolute; width: 100%; height: 100%; background: #2d3748;
+            display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100;
+        }
+        #start-btn {
+            padding: 15px 40px; background: #22c55e; color: white; border: none;
+            font-size: 22px; font-weight: bold; cursor: pointer; border-radius: 5px; box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<div id="intro">
+    <h1 style="font-size: 36px; text-align:center; color:#22c55e;">MEDAL OF Honor: BUDAPEST 1944</h1>
+    <p style="font-size: 18px; max-width: 600px; text-align:center; line-height:1.6;">
+        Valódi 3D szimuláció: Világos nappal, a Duna folyó, a Parlament kupolás épülete, a Lánchíd és teljesen animált, lépkedő, arccal rendelkező szövetséges és ellenséges katonák!
+    </p>
+    <button id="start-btn">UGORJ BE A CÉLTERÜLETRE</button>
+</div>
+
+<div id="game-container">
+    <div id="radar"></div>
+    <div id="crosshair"></div>
+    <div id="hud">
+        <div>ÉLETERŐ: <span id="hp" style="color:#22c55e;">100%</span></div>
+        <div>ELLENSÉG: <span id="enemies-count" style="color:#ff3333;">12</span></div>
+        <div>FEGYVER: <span style="color:#eab308;">M1 Garand</span></div>
+    </div>
+</div>
+
+<script>
+let scene, camera, renderer;
+let yaw = 0, pitch = 0;
+let player = { x: 0, y: 90, z: 120, phase: "AIRBORNE", hp: 100 };
+let keys = {};
+let npcs = [];
+let globalTime = 0;
+
+document.getElementById('start-btn').addEventListener('click', () => {
+    document.getElementById('intro').style.display = 'none';
+    init();
+});
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xa5d6f7); // Világos, tiszta nappali kék égbolt
+    scene.fog = new THREE.FogExp2(0xa5d6f7, 0.003);
+
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.rotation.order = "YXZ";
+    camera.position.set(player.x, player.y, player.z);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('game-container').appendChild(renderer.domElement);
+
+    // Erős nappali fények
+    const ambient = new THREE.AmbientLight(0xffffff, 0.7); scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xfffaed, 1.0); sun.position.set(100, 200, 50); scene.add(sun);
+
+    // Buda és Pest partok (Zöld fű és flaszter)
+    const budaGeo = new THREE.PlaneGeometry(400, 1000);
+    const budaMat = new THREE.MeshLambertMaterial({ color: 0x557a46 });
+    const buda = new THREE.Mesh(budaGeo, budaMat); buda.rotation.x = -Math.PI/2; buda.position.set(-250, 0, 0); scene.add(buda);
+
+    const pestGeo = new THREE.PlaneGeometry(400, 1000);
+    const pestMat = new THREE.MeshLambertMaterial({ color: 0x6b7280 });
+    const pest = new THREE.Mesh(pestGeo, pestMat); pest.rotation.x = -Math.PI/2; pest.position.set(250, 0, 0); scene.add(pest);
+
+    // 🌊 A VALÓDI DUNA FOLYÓ
+    const dunaGeo = new THREE.PlaneGeometry(100, 1000);
+    const dunaMat = new THREE.MeshLambertMaterial({ color: 0x1d4ed8, transparent: true, opacity: 0.85 }); // Gyönyörű kék Duna
+    const duna = new THREE.Mesh(dunaGeo, dunaMat); duna.rotation.x = -Math.PI/2; duna.position.set(0, 0.5, 0); scene.add(duna);
+
+    // 🌉 A LÁNCHÍD (Íves kapukkal és pillérekkel a Dunán át)
+    const lanchid = new THREE.Group();
+    const hídMat = new THREE.MeshLambertMaterial({ color: 0x4b5563 });
+    const utca = new THREE.Mesh(new THREE.BoxGeometry(140, 3, 16), hídMat); utca.position.y = 6; lanchid.add(utca);
+    
+    // Két nagy kőpilon kapu
+    for(let xO of [-40, 40]) {
+        let pilon = new THREE.Mesh(new THREE.BoxGeometry(8, 28, 18), new THREE.MeshLambertMaterial({ color: 0x374151 }));
+        pilon.position.set(xO, 14, 0); lanchid.add(pilon);
+    }
+    lanchid.position.set(0, 0, 0); scene.add(lanchid);
+
+    // 🏛️ A PARLAMENT ÉPÜLETE (Pesti parton, hatalmas kupolával!)
+    const parlament = new THREE.Group();
+    const parMat = new THREE.MeshLambertMaterial({ color: 0xe5e7eb }); // Fehér kőfalak
+    const alap = new THREE.Mesh(new THREE.BoxGeometry(40, 20, 90), parMat); alap.position.y = 10; parlament.add(alap);
+    // Nagy főkupola középen
+    const kupola = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 10, 15, 16), new THREE.MeshLambertMaterial({ color: 0x991b1b })); // Pirosas-barna kupolatető
+    kupola.position.y = 27; parlament.add(kupola);
+    parlament.position.set(80, 0, -120); // Ott áll a Duna partján Pest felől
+    scene.add(parlament);
+
+    // 🧍 ANIMÁLT KATONÁK GENERÁLÁSA (Valódi végtagok, bőrszínű arc, fegyver)
+    for(let i=0; i<12; i++) {
+        let isAlly = i < 5;
+        let katona = createDetailedSoldier(isAlly);
+        
+        // Elszórás a híd környékén
+        let startX = isAlly ? -60 : 60;
+        katona.group.position.set(startX + Math.random()*20, 6, Math.random()*40 - 20);
+        scene.add(katona.group);
+        
+        npcs.push({
+            group: katona.group,
+            leftLeg: katona.leftLeg, rightLeg: katona.rightLeg,
+            leftArm: katona.leftArm, rightArm: katona.rightArm,
+            isAlly: isAlly, speed: isAlly ? 0.08 : -0.08, dead: false
+        });
+    }
+
+    // Egér rögzítés és nézelődés setup
+    document.getElementById('game-container').addEventListener('click', () => {
+        document.body.requestPointerLock();
+    });
+
+    window.addEventListener('mousemove', e => {
+        if (document.pointerLockElement) {
+            yaw -= e.movementX * 0.0025;
+            pitch -= e.movementY * 0.0025;
+            pitch = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, pitch));
+            camera.rotation.set(pitch, yaw, 0, "YXZ");
+        }
+    });
+
+    window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+    window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+    window.addEventListener('mousedown', shoot);
+
+    animate();
+}
+
+// 🪖 PROFI SOLDIER MODELL: Test, végtagok, bőrszínű fej, sisak, puska
+function createDetailedSoldier(isAlly) {
+    const group = new THREE.Group();
+    const uniMat = new THREE.MeshLambertMaterial({ color: isAlly ? 0x22c55e : 0x64748b }); // USA zöld vs Német szürke
+    const skinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // BŐRSZÍNŰ ARC
+    const gunMat = new THREE.MeshLambertMaterial({ color: 0x451a03 });
+
+    // Törzs
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.0, 0.8), uniMat); torso.position.y = 2.2; group.add(torso);
+    // Arc / Fej
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 10, 10), skinMat); head.position.y = 3.4; group.add(head);
+    // Rohamsisak
+    const sisak = new THREE.Mesh(new THREE.SphereGeometry(0.46, 10, 10, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshLambertMaterial({ color: isAlly ? 0x14532d : 0x334155 }));
+    sisak.position.y = 3.45; group.add(sisak);
+
+    // Karok
+    const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.2, 0.3), uniMat); leftArm.position.set(-0.75, 2.4, 0); group.add(leftArm);
+    const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.2, 0.3), uniMat); rightArm.position.set(0.75, 2.4, 0); group.add(rightArm);
+
+    // Lábak (különálló elemek az animációhoz!)
+    const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.4, 0.4), uniMat); leftLeg.position.set(-0.3, 0.9, 0); group.add(leftLeg);
+    const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.4, 0.4), uniMat); rightLeg.position.set(0.3, 0.9, 0); group.add(rightLeg);
+
+    // Puska a kézben
+    const rifle = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 1.8), gunMat); rifle.position.set(0.4, 2.2, -0.5); group.add(rifle);
+
+    return { group, leftLeg, rightLeg, leftArm, rightArm };
+}
+
+function shoot() {
+    if(player.phase !== "GROUND") return;
+    
+    let dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+    npcs.forEach(npc => {
+        if(npc.dead || npc.isAlly) return;
+        
+        let toNpc = npc.group.position.clone().sub(camera.position);
+        let dist = toNpc.length();
+        if(dist > 100) return;
+
+        toNpc.normalize();
+        let dot = dir.dot(toNpc);
+        if(dot > 0.993) { // Találat!
+            npc.dead = true;
+            npc.group.rotation.z = Math.PI / 2; // Eldől a földön, nem tűnik el gagyin!
+            npc.group.position.y = 0.5;
+            
+            let aliveCount = npcs.filter(n => !n.isAlly && !n.dead).length;
+            document.getElementById('enemies-count').innerText = aliveCount;
+            if(aliveCount <= 0) alert("GYŐZELEM! Megmentetted Budapestet és a Lánchidat!");
+        }
+    });
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    globalTime += 0.05;
+
+    // 🪂 EJTŐERNYŐS ERASZKODÁS FÁZIS
+    if (player.phase === "AIRBORNE") {
+        player.y -= 0.3;
+        let speed = 0.5;
+        if (keys['w']) { player.x -= Math.sin(yaw)*speed; player.z -= Math.cos(yaw)*speed; }
+        if (keys['s']) { player.x += Math.sin(yaw)*speed; player.z += Math.cos(yaw)*speed; }
+        camera.position.set(player.x, player.y, player.z);
+
+        if (player.y <= 9.5) { // A híd magassága felett picit landolunk
+            player.phase = "GROUND";
+        }
+    } 
+    // 🪖 UTCAI FPS GYALOGOS HARC FÁZIS
+    else {
+        let speed = 0.4;
+        if (keys['w']) { player.x -= Math.sin(yaw)*speed; player.z -= Math.cos(yaw)*speed; }
+        if (keys['s']) { player.x += Math.sin(yaw)*speed; player.z += Math.cos(yaw)*speed; }
+        if (keys['a']) { player.x -= Math.cos(yaw)*speed; player.z += Math.sin(yaw)*speed; }
+        if (keys['d']) { player.x += Math.cos(yaw)*speed; player.z -= Math.sin(yaw)*speed; }
+        camera.position.set(player.x, 9.5, player.z);
+    }
+
+    // 🏃 KATONÁK JÁRÁS-ANIMÁCIÓJA ÉS MOZGÁSA (VALÓDI LÁBMOZGÁS!)
+    npcs.forEach(npc => {
+        if(npc.dead) return;
+
+        // Előrehaladás a hídon egymás felé
+        npc.group.position.x += npc.speed;
+        
+        // Végtagok lengetése (Séta ciklus)
+        let swing = Math.sin(globalTime * 3) * 0.5;
+        npc.leftLeg.rotation.x = swing;
+        npc.rightLeg.rotation.x = -swing;
+        npc.leftArm.rotation.x = -swing;
+        npc.rightArm.rotation.x = swing;
+
+        // Mindig a haladási irányba nézzenek
+        npc.group.rotation.y = npc.speed > 0 ? Math.PI / 2 : -Math.PI / 2;
+    });
+
+    renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
