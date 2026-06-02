@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <title>Medal of Honor: Budapest Airborne - Browser Edition</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #gameContainer {
+            position: relative;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+        }
+        canvas {
+            background: #222;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+<div id="gameContainer">
+    <canvas id="gameCanvas" width="1024" height="576"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- JÁTÉK ÁLLAPOTOK ---
+const STATES = { PLAYING: 1, PAUSED: 2, RESPAWNING: 3, NEXT_LEVEL: 4, GAME_OVER: 5 };
+let currentState = STATES.PLAYING;
+let currentLevel = 1; // 1: Lánchíd, 2: Parlament, 3: Tank
+
+// --- IDŐZÍTŐK & RENDSZEREK ---
+let lastTime = 0;
+let flashTimer = 0; // Sérülésnél villogás
+let speechTimer = 0;
+let currentSpeech = "";
+let respawnTimer = 0;
+let deadSoldierName = "";
+let newSoldierName = "";
+
+const soldierNames = ["John Miller közlegény", "Robert Vance tizedes", "Thomas Baker őrmester", "William Smith tizedes"];
+
+// --- JÁTÉKOS ADATOK ---
+let player = {
+    x: 150, y: 400,
+    angle: 0, // Nyilakkal forgás/célzás
+    speed: 2,
+    running: false,
+    hpBlocks: [100, 100, 100, 100], // 4 darab életerő blokk
+    currentBlock: 3,
+    ammo: 30, maxAmmo: 120,
+    grenades: 3,
+    activeWeapon: "Thompson M1A1",
+    isRegenerating: false,
+    regDischargeTimer: 0 // Idő, amíg nem lőttek, hogy visszatöltsön
+};
+
+// --- NYOMVA TARTOTT GOMBOK ---
+const keys = {};
+window.addEventListener('keydown', (e) => {
+    keys[e.key] = true;
+    
+    // Pausz gomb (P)
+    if (e.key.toLowerCase() === 'p') {
+        if (currentState === STATES.PLAYING) currentState = STATES.PAUSED;
+        else if (currentState === STATES.PAUSED) currentState = STATES.PLAYING;
+    }
+    // Fegyverváltás gombok (1, 2)
+    if (currentState === STATES.PLAYING) {
+        if (e.key === '1') player.activeWeapon = "Thompson M1A1";
+        if (e.key === '2') player.activeWeapon = "M1 Garand";
+        if (e.key.toLowerCase() === 'g' && player.grenades > 0) {
+            throwGrenade();
+        }
+    }
+});
+window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+// --- PÁLYAELEMEK (Fedezékek, Falak, Célpontok) ---
+let entities = [];
+let targetObjective = { x: 900, y: 150, description: "Juss el a Lánchídig a barikádokon át!" };
+
+function initLevel(level) {
+    entities = [];
+    player.x = 100; player.y = 450; player.angle = 0;
+    
+    if (level === 1) {
+        targetObjective = { x: 900, y: 200, description: "Tisztítsd meg a rakpartot és juss el a Lánchídig!" };
+        // Homokzsákok, kiégett kocsik, szövetséges NPC-k
+        entities.push({ type: 'cover', name: 'Homokzsák', x: 400, y: 350, w: 80, h: 40 });
+        entities.push({ type: 'cover', name: 'Kiégett Autó', x: 600, y: 200, w: 100, h: 60 });
+        entities.push({ type: 'ally', x: 350, y: 380, text: "Tartsátok a kapualjat! Roham!" });
+        entities.push({ type: 'enemy', x: 750, y: 220, hp: 100, part: 'body' });
+        entities.push({ type: 'enemy', x: 800, y: 350, hp: 100, part: 'body' });
+    } else if (level === 2) {
+        targetObjective = { x: 850, y: 100, description: "Hatolj be a Parlamentbe és robbantsd fel a Flak ágyút!" };
+        entities.push({ type: 'cover', name: 'Parlamenti Oszlop', x: 300, y: 150, w: 50, h: 150 });
+        entities.push({ type: 'cover', name: 'Láda', x: 500, y: 400, w: 50, h: 50 });
+        entities.push({ type: 'ally', x: 280, y: 200, text: "Fedezz engem, indulok a lépcsőházhoz!" });
+        entities.push({ type: 'enemy', x: 650, y: 150, hp: 100 });
+        entities.push({ type: 'flak', x: 850, y: 120, w: 60, h: 60, broken: false });
+    } else if (level === 3) {
+        targetObjective = { x: 700, y: 300, description: "FÉLRE AZ ÚTBÓL! Robbantsd fel a Párduc Nehéztankot hátulról!" };
+        entities.push({ type: 'cover', name: 'Romos Kőfal', x: 400, y: 200, w: 120, h: 50 });
+        entities.push({ type: 'tank', x: 700, y: 300, w: 140, h: 80, angle: Math.PI, hp: 3 });
+    }
+}
+
+// --- JÁTÉKMENET LOGIKA ---
+function throwGrenade() {
+    player.grenades--;
+    triggerSpeech("Gránát! Deckung!", false); // Németek üvöltenek
+    // Egyszerűsített sebzés a legközelebbi ellenségre
+    entities.forEach(e => {
+        if (e.type === 'enemy') e.hp -= 80;
+    });
+}
+
+function triggerSpeech(text, isAlly = true) {
+    currentSpeech = (isAlly ? "[SZÖVETSÉGES]: " : "[NÉMET]: ") + text;
+    speechTimer = 180; // 3 másodpercig látszik
+}
+
+function takeDamage(amount) {
+    if (currentState !== STATES.PLAYING) return;
+    flashTimer = 10;
+    player.regDischargeTimer = 180; // 3 másodpercig nincs öngyógyítás
+    
+    let current = player.currentBlock;
+    player.hpBlocks[current] -= amount;
+    
+    if (player.hpBlocks[current] <= 0) {
+        player.hpBlocks[current] = 0;
+        player.currentBlock--;
+        if (player.currentBlock < 0) {
+            // MEGHALT - Elindul az Új Ember respawn rendszer
+            currentState = STATES.RESPAWNING;
+            respawnTimer = 180; 
+            deadSoldierName = soldierNames[Math.floor(Math.random() * soldierNames.length)];
+            newSoldierName = soldierNames[Math.floor(Math.random() * soldierNames.length)];
+            while(newSoldierName === deadSoldierName) {
+                newSoldierName = soldierNames[Math.floor(Math.random() * soldierNames.length)];
+            }
+        }
+    }
+}
+
+// --- FŐ LOGIKAI CIKLUS ---
+function update(dt) {
+    if (currentState === STATES.PLAYING) {
+        // --- 1. BILLENTYŰZET IRÁNYÍTÁS ---
+        // Forgás / Célzás nyilakkal
+        if (keys['ArrowLeft']) player.angle -= 0.04;
+        if (keys['ArrowRight']) player.angle += 0.04;
+        
+        // Futás Shift gombbal
+        player.running = keys['Shift'];
+        player.speed = player.running ? 4 : 2;
+        
+        // Mozgás WASD-vel
+        let dx = 0; let dy = 0;
+        if (keys['w'] || keys['W']) { dx += Math.cos(player.angle); dy += Math.sin(player.angle); }
+        if (keys['s'] || keys['S']) { dx -= Math.cos(player.angle); dy -= Math.sin(player.angle); }
+        if (keys['a'] || keys['A']) { dx += Math.sin(player.angle); dy -= Math.cos(player.angle); }
+        if (keys['d'] || keys['D']) { dx -= Math.sin(player.angle); dy += Math.cos(player.angle); }
+        
+        player.x += dx * player.speed;
+        player.y += dy * player.speed;
+
+        // Tüzelés szimuláció (Space)
+        if (keys[' '] && player.ammo > 0 && Math.random() < 0.1) {
+            player.ammo--;
+            // Hitbox alapú lövés szimuláció az első ellenségre a látómezőben
+            entities.forEach(e => {
+                if (e.type === 'enemy' && e.hp > 0) {
+                    let hitPart = Math.random() < 0.2 ? 'head' : (Math.random() < 0.3 ? 'leg' : 'body');
+                    if (hitPart === 'head') {
+                        e.hp = 0; // Fejlövés azonnali halál
+                        triggerSpeech("Fejlövés! Kész!", true);
+                    } else if (hitPart === 'leg') {
+                        e.hp -= 30; // Láblövés kevesebb sebzés
+                        triggerSpeech("Eltaláltam a lábát, sántít!", true);
+                    } else {
+                        e.hp -= 50;
+                    }
+                }
+            });
+        }
+
+        // --- 2. JÁTÉKOS REGENERÁCIÓ (MoH szisztéma) ---
+        if (player.regDischargeTimer > 0) {
+            player.regDischargeTimer--;
+        } else {
+            let cb = player.currentBlock;
+            if (cb >= 0 && player.hpBlocks[cb] < 100) {
+                player.hpBlocks[cb] += 0.5; // Lassan visszatöltődik a villogó blokk
+                if (player.hpBlocks[cb] > 100) player.hpBlocks[cb] = 100;
+            }
+        }
+
+        // --- 3. ENTITY ÉS TANK MECHANIKÁK ---
+        entities.forEach(e => {
+            // Szövetséges szövegek triggerelése távolság alapján
+            if (e.type === 'ally' && Math.random() < 0.005) {
+                triggerSpeech(e.text, true);
+            }
+            
+            // Tank AI és Eltaposás mechanika (3. Szint)
+            if (e.type === 'tank') {
+                // Forog a játékos felé
+                let targetAngle = Math.atan2(player.y - e.y, player.x - e.x);
+                e.angle += (targetAngle - e.angle) * 0.02;
+                
+                // Véletlenszerű tank lövés
+                if (Math.random() < 0.01) takeDamage(40);
+                
+                // HALÁLOS LÁNCTALP ELTAPOSÁS MECHANIKA
+                let dist = Math.hypot(player.x - e.x, player.y - e.y);
+                if (dist < 60) {
+                    takeDamage(200); // Azonnali halálos sebzés, eltipor
+                    triggerSpeech("ACHTUNG! Átgázolt rajta a Párduc!", false);
+                }
+            }
+        });
+
+        // Küldetés befejezési ellenőrzés (ha elérjük a sárga nyíl célpontját)
+        let distToObjective = Math.hypot(player.x - targetObjective.x, player.y - targetObjective.y);
+        if (distToObjective < 50) {
+            if (currentLevel < 3) {
+                currentLevel++;
+                currentState = STATES.NEXT_LEVEL;
+            } else {
+                currentState = STATES.GAME_OVER;
+            }
+        }
+    } 
+    else if (currentState === STATES.RESPAWNING) {
+        respawnTimer--;
+        if (respawnTimer <= 0) {
+            // Új katonaként éled újra, de a pálya állása megmarad!
+            player.hpBlocks = [100, 100, 100, 100];
+            player.currentBlock = 3;
+            player.ammo = 30;
+            player.x = 100; player.y = 450; // Újraugrik a bázisról
+            currentState = STATES.PLAYING;
+        }
+    }
+
+    if (speechTimer > 0) speechTimer--;
+}
+
+// --- GRAFIKAI MEGJELENÍTÉS ---
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 1. Háttér (Budapest Romos utca / Parlament vázlatos dizájn)
+    ctx.fillStyle = "#332c25";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Dunapart / Út dekoráció
+    ctx.fillStyle = "#222";
+    ctx.fillRect(0, 350, canvas.width, 226);
+    
+    // Parlament neogótikus sziluett a 2. szinten
+    if (currentLevel === 2) {
+        ctx.fillStyle = "#444";
+        ctx.fillRect(700, 100, 250, 250);
+        ctx.fillStyle = "#555";
+        // Kupola
+        ctx.beginPath();
+        ctx.arc(825, 100, 40, Math.PI, 0);
+        ctx.fill();
+    }
+
+    // 2. Objektumok, fedezékek és NPC-k kirajzolása
+    entities.forEach(e => {
+        if (e.type === 'cover') {
+            ctx.fillStyle = "#5e5245"; // Homokzsák / Láda szín
+            ctx.fillRect(e.x, e.y, e.w, e.h);
+            ctx.strokeStyle = "#fff";
+            ctx.strokeRect(e.x, e.y, e.w, e.h);
+            ctx.fillStyle = "#fff";
+            ctx.fillText(e.name, e.x + 5, e.y + 20);
+        }
+        else if (e.type === 'ally') {
+            ctx.fillStyle = "#4b5320"; // Szövetséges zöld
+            ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = "#fff"; ctx.fillText("Szövetséges", e.x - 30, e.y - 20);
+        }
+        else if (e.type === 'enemy' && e.hp > 0) {
+            ctx.fillStyle = "#555555"; // Német szürke
+            ctx.beginPath(); ctx.arc(e.x, e.y, 15, 0, Math.PI*2); ctx.fill();
+            // Sisak vonal
+            ctx.strokeStyle = "#f00";
+            ctx.strokeRect(e.x - 15, e.y - 25, 30, 5);
+            ctx.fillStyle = "#fff"; ctx.fillText("Német Wehrmacht", e.x - 40, e.y - 30);
+        }
+        else if (e.type === 'tank') {
+            // Tank alváz
+            ctx.save();
+            ctx.translate(e.x, e.y);
+            ctx.rotate(e.angle);
+            ctx.fillStyle = "#3e423a"; // Terepszín tank
+            ctx.fillRect(-e.w/2, -e.h/2, e.w, e.h);
+            // Lánctalpak
+            ctx.fillStyle = "#111";
+            ctx.fillRect(-e.w/2, -e.h/2 - 5, e.w, 10);
+            ctx.fillRect(-e.w/2, e.h/2 - 5, e.w, 10);
+            // Torony
+            ctx.fillStyle = "#2b2e28";
+            ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI*2); ctx.fill();
+            // Cső
+            ctx.strokeStyle = "#2b2e28";
+            ctx.lineWidth = 6;
+            ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(60, 0); ctx.stroke();
+            ctx.restore();
+            ctx.fillStyle = "#fff"; ctx.fillText("PÁRDUC NEHÉZTANK (Lánctalp veszély!)", e.x - 80, e.y - 60);
+        }
+    });
+
+    // Célpont jelölő doboz
+    ctx.strokeStyle = "#ff0";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(targetObjective.x - 20, targetObjective.y - 20, 40, 40);
+
+    // 3. Játékos kirajzolása
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.angle);
+    ctx.fillStyle = "#1b4d3e"; // Ejtőernyős zöld
+    ctx.beginPath();
+    ctx.arc(0, 0, 15, 0, Math.PI * 2);
+    ctx.fill();
+    // Fegyver csöve amerre néz
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(25, 0); ctx.stroke();
+    ctx.restore();
+
+    // 4. KIJELZŐK (HUD) - Jobb alsó sarok és forgó RADAR sárga nyilakkal
+    // RADAR KÖR
+    let rx = 900, ry = 480, rRadius = 60;
+    ctx.fillStyle = "rgba(0, 50, 0, 0.6)";
+    ctx.beginPath(); ctx.arc(rx, ry, rRadius, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = "#0f0";
+    ctx.stroke();
+    
+    // Forgó radar-vonal vagy játékos iránya
+    ctx.save();
+    ctx.translate(rx, ry);
+    ctx.rotate(-player.angle);
+    ctx.fillStyle = "#0f0";
+    ctx.fillRect(-2, -2, 4, 4); // Középpont (Játékos)
+    
+    // SÁRGA NYÍL AZ OBJEKTÍVÁHOZ (MOH STÍLUS)
+    let angleToObj = Math.atan2(targetObjective.y - player.y, targetObjective.x - player.x);
+    ctx.save();
+    ctx.rotate(angleToObj + Math.PI/2);
+    ctx.fillStyle = "#ff0"; // Sárga szín
+    ctx.beginPath();
+    ctx.moveTo(0, -rRadius + 10);
+    ctx.lineTo(-6, -rRadius + 22);
+    ctx.lineTo(6, -rRadius + 22);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    ctx.restore();
+
+    // FEGYVER ÉS LŐSZER KIJELZŐ
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(650, 500, 180, 60);
+    ctx.fillStyle = "#fff";
+    ctx.font = "14px Courier New";
+    ctx.fillText(player.activeWeapon, 660, 520);
+    ctx.fillText(`Lőszer: ${player.ammo}/${player.maxAmmo}`, 660, 540);
+    ctx.fillText(`Gránát (G): ${player.grenades}`, 660, 555);
+
+    // 5. MOH 4 ZÖLD BLOKKOS ÉLETERŐ HUD (Bal alsó sarok)
+    for (let i = 0; i < 4; i++) {
+        ctx.strokeStyle = "#0f0";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(30 + i * 45, 510, 40, 30);
+        
+        if (i < player.currentBlock) {
+            ctx.fillStyle = "#008000"; // Tele lévő blokkok
+            ctx.fillRect(32 + i * 45, 512, 36, 26);
+        } else if (i === player.currentBlock) {
+            // Aktuális blokk villog vagy simán csökken
+            if (player.regDischargeTimer > 0 && Math.floor(Date.now() / 200) % 2 === 0) {
+                ctx.fillStyle = "#f00"; // Villogó piros sebzésnél
+            } else {
+                ctx.fillStyle = "#00ff00";
+            }
+            let hpWidth = (player.hpBlocks[i] / 100) * 36;
+            ctx.fillRect(32 + i * 45, 512, hpWidth, 26);
+        }
+    }
+
+    // NPC Felirat / Beszéd sáv
+    if (speechTimer > 0) {
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(50, 30, 924, 40);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(currentSpeech, 70, 55);
+    }
+
+    // Sérülés vörös villanás effekje
+    if (flashTimer > 0) {
+        ctx.fillStyle = `rgba(255, 0, 0, ${flashTimer / 20})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        flashTimer--;
+    }
+
+    // --- PAUSZ / INTERFACE KÉPERNYŐK ---
+    if (currentState === STATES.PAUSED) {
+        drawOverlay("JÁTÉK MEGSZAKÍTVA (PAUSE)", targetObjective.description, "NYOMD MEG A 'P' GOMBOT A HARC FOLYTATÁSÁHOZ!");
+    } 
+    else if (currentState === STATES.RESPAWNING) {
+        drawOverlay(`${deadSoldierName} ELESETT A HARCBAN`, `Új katona érkezik a légtérbe: ${newSoldierName}`, "KÉSZÜLJ APARTIZÁN AKCIÓRA, A CSATA MENETE FOLYTATÓDIK...");
+    }
+    else if (currentState === STATES.NEXT_LEVEL) {
+        drawOverlay("KÜLDETÉS SIKERES!", "Mész tovább a következő budapesti helyszínre...", "NYOMD MEG AZ ENTER-T A FOLYTATÁSHOZ");
+        if (keys['Enter']) { currentState = STATES.PLAYING; initLevel(currentLevel); }
+    }
+    else if (currentState === STATES.GAME_OVER) {
+        drawOverlay("A HADJÁRAT VÉGET ÉRT!", "Gratulálunk! Budapest felszabadult a tank megsemmisítésével!", "INGYENES BÖNGÉSZŐS KIADÁS - KÖSZÖNJÜK A JÁTÉKOT!");
+    }
+}
+
+function drawOverlay(title, sub, footer) {
+    ctx.fillStyle = "rgba(15, 12, 10, 0.85)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#ff0";
+    ctx.font = "24px Courier New";
+    ctx.fillText(title, 100, 200);
+    ctx.fillStyle = "#fff";
+    ctx.font = "18px Courier New";
+    ctx.fillText(`AKTUÁLIS FELADAT: ${sub}`, 100, 260);
+    ctx.fillStyle = "#888";
+    ctx.font = "14px Courier New";
+    ctx.fillText(footer, 100, 400);
+}
+
+// --- FŐ CIKLUS INDÍTÁSA ---
+function loop(time) {
+    let dt = time - lastTime;
+    lastTime = time;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+}
+
+initLevel(currentLevel);
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
