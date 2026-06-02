@@ -1,0 +1,2054 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <title>Medal of Honor: Budapest Airborne 3D - Hardcore Engine Part 1</title>
+    <style>
+        body { margin: 0; background-color: #050505; overflow: hidden; font-family: 'Courier New', monospace; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        /* PROFESSZIONÁLIS TÖLTŐKÉPERNYŐ ÉS ELLENŐRZŐ PANEL */
+        #engine-loader {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, #1a1a1a 0%, #000000 100%);
+            color: #ff0; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 1000;
+        }
+        .loader-box {
+            border: 2px solid #ff0; padding: 30px; background: rgba(0,0,0,0.8);
+            box-shadow: 0 0 20px rgba(255,255,0,0.4); border-radius: 8px; text-align: center;
+        }
+        .bar-container { width: 300px; height: 20px; border: 1px solid #ff0; margin-top: 15px; background: #222; }
+        .bar-fill { width: 0%; height: 100%; background: #ff0; transition: width 0.2s; }
+        .status-text { color: #fff; font-size: 14px; margin-top: 10px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<div id="engine-loader">
+    <div class="loader-box">
+        <h2 style="letter-spacing: 3px; margin: 0 0 10px 0;">MOH: BUDAPEST AIRBORNE</h2>
+        <div style="color: #aaa; font-size: 12px;">3D GRAFIKAI ÉS FIZIKAI MOTOR INITIALIZÁLÁSA</div>
+        <div class="bar-container">
+            <div id="progress-bar" class="bar-fill"></div>
+        </div>
+        <div id="status-log" class="status-text">Geometriák generálása...</div>
+    </div>
+</div>
+
+<canvas id="mainCanvas"></canvas>
+
+<script>
+// ============================================================================
+// GLOBÁLIS MOTOR RENDELKEZÉSEK ÉS 3D KÖRNYEZET
+// ============================================================================
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('mainCanvas'), antialias: true, powerPreference: "high-performance" });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+// Valódi atmoszférikus köd (piszkos, háborús pesti levegő)
+scene.background = new THREE.Color(0x8a9ba8);
+scene.fog = new THREE.FogExp2(0x8a9ba8, 0.014);
+
+// ============================================================================
+// VILÁGÍTÁSI RENDSZER (VALÓS IDŐS ÁRNYÉK-LEKÉPEZÉSSEL)
+// ============================================================================
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
+scene.add(ambientLight);
+
+const sunLight = new THREE.DirectionalLight(0xfff5e0, 1.3);
+sunLight.position.set(50, 140, 40);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.width = 4096; // Brutális felbontású árnyékok a házaknak
+sunLight.shadow.mapSize.height = 4096;
+sunLight.shadow.camera.near = 0.5;
+sunLight.shadow.camera.far = 300;
+const d = 120;
+sunLight.shadow.camera.left = -d;
+sunLight.shadow.camera.right = d;
+sunLight.shadow.camera.top = d;
+sunLight.shadow.camera.bottom = -d;
+sunLight.shadow.bias = -0.0005;
+scene.add(sunLight);
+
+// ============================================================================
+// TEXTÚRA ÉS ANYAG RENDSZER (NAGY FELBONTÁSÚ KÜLSŐ LINKES ASZINKRON FORRÁSOK)
+// ============================================================================
+const textureLoader = new THREE.TextureLoader();
+let totalAssets = 3;
+let loadedAssets = 0;
+
+function assetLoaded(assetName) {
+    loadedAssets++;
+    const progress = (loadedAssets / totalAssets) * 100;
+    document.getElementById('progress-bar').style.width = progress + '%';
+    document.getElementById('status-log').innerText = "Betöltve: " + assetName;
+    if(loadedAssets >= totalAssets) {
+        setTimeout(() => {
+            document.getElementById('engine-loader').style.display = 'none';
+        }, 500);
+    }
+}
+
+// Magas minőségű koptatott macskakő
+const roadTexture = textureLoader.load('https://images.unsplash.com/photo-1590055531776-692db2feef83?q=80&w=1024', () => assetLoaded("Utcai macskakő"));
+roadTexture.wrapS = THREE.RepeatWrapping;
+roadTexture.wrapT = THREE.RepeatWrapping;
+roadTexture.repeat.set(6, 60);
+
+// Patinás pesti téglafal
+const wallTexture = textureLoader.load('https://images.unsplash.com/photo-1584622650111-993a426fbf0a?q=80&w=1024', () => assetLoaded("Bérház homlokzat"));
+wallTexture.wrapS = THREE.RepeatWrapping;
+wallTexture.wrapT = THREE.RepeatWrapping;
+wallTexture.repeat.set(4, 4);
+
+// Romtörmelék textúra
+const rubbleTexture = textureLoader.load('https://images.unsplash.com/photo-1544982503-9f984c14501a?q=80&w=512', () => assetLoaded("Törmelék és romok"));
+
+// ============================================================================
+// VILÁG GENERÁLÁSA (VALÓDI 3D BÉRHÁZAK MÉLYSÉGGEL ÉS KIUGROKKAL)
+// ============================================================================
+const groundGeo = new THREE.PlaneGeometry(70, 600);
+const groundMat = new THREE.MeshStandardMaterial({ map: roadTexture, roughness: 0.8, metalness: 0.1 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const collidableMeshList = [];
+
+// Komplex házépítő függvény: valódi 3D terekkel, nem lapos textúrával!
+function buildDetailedBlock(x, z, w, h, d, side) {
+    const group = new THREE.Group();
+    
+    // Fő faltest
+    const mainGeo = new THREE.BoxGeometry(w, h, d);
+    const mainMat = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.7 });
+    const mainMesh = new THREE.Mesh(mainGeo, mainMat);
+    mainMesh.castShadow = true;
+    mainMesh.receiveShadow = true;
+    group.add(mainMesh);
+    
+    // Valódi 3D ablakkeretek és beugrók hozzáadása, hogy megtörje a sík felületet
+    const windowCountY = Math.floor(h / 7);
+    const windowCountZ = Math.floor(d / 6);
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+    
+    for(let y = 0; y < windowCountY; y++) {
+        for(let j = 0; j < windowCountZ; j++) {
+            const frameGeo = new THREE.BoxGeometry(0.3, 3, 1.8);
+            const frame = new THREE.Mesh(frameGeo, frameMat);
+            
+            // Ablakok elhelyezése a ház oldalán a megfelelő pozícióba
+            let posX = side === "left" ? (w / 2 + 0.1) : (-w / 2 - 0.1);
+            let posY = -h / 2 + (y * 7) + 4;
+            let posZ = -d / 2 + (j * 6) + 3;
+            
+            frame.position.set(posX, posY, posZ);
+            group.add(frame);
+        }
+    }
+    
+    group.position.set(x, h / 2, z);
+    scene.add(group);
+    
+    // Mentés a fizikai ütközésekhez
+    collidableMeshList.push(mainMesh);
+}
+
+// Zárt, monumentális utcakép felépítése
+for (let zPos = 250; zPos > -450; zPos -= 75) {
+    let randHeightLeft = 50 + Math.random() * 20;
+    let randHeightRight = 50 + Math.random() * 20;
+    
+    buildDetailedBlock(-44, zPos, 20, randHeightLeft, 70, "left");
+    buildDetailedBlock(44, zPos, 20, randHeightRight, 70, "right");
+}
+
+// Valódi 3D-s romok és barikádok lehelyezése az utcára
+const debrisMat = new THREE.MeshStandardMaterial({ map: rubbleTexture, roughness: 0.9 });
+for(let i = 0; i < 25; i++) {
+    let size = 1.5 + Math.random() * 3.5;
+    const debrisGeo = new THREE.BoxGeometry(size, size * 0.6, size * 1.2);
+    const debris = new THREE.Mesh(debrisGeo, debrisMat);
+    
+    let rx = (Math.random() - 0.5) * 35;
+    let rz = (Math.random() - 0.5) * 450;
+    
+    debris.position.set(rx, (size * 0.6)/2, rz);
+    debris.rotation.set(Math.random()*0.4, Math.random()*Math.PI, Math.random()*0.4);
+    debris.castShadow = true;
+    debris.receiveShadow = true;
+    scene.add(debris);
+    collidableMeshList.push(debris); // A romoknak is van fizikai ütközése!
+}
+
+// ============================================================================
+// FIXÁLT FPS IRÁNYÍTÁSI ÉS MOZGÁSI RENDSZER (TERMÉSZETES W-A-S-D)
+// ============================================================================
+let player = {
+    x: 0, z: 120,
+    rotY: 0,
+    speed: 0.22,
+    radius: 1.5
+};
+
+const inputKeys = {};
+window.addEventListener('keydown', (e) => { inputKeys[e.key.toLowerCase()] = true; });
+window.addEventListener('keyup', (e) => { inputKeys[e.key.toLowerCase()] = false; });
+
+// Egér alapú forgatás (természetes FPS nézet)
+let targetRotationY = player.rotY;
+window.addEventListener('mousemove', (e) => {
+    // Ha az egér mozog, finoman fordítjuk a karakter fejét
+    if(document.pointerLockElement === renderer.domElement) {
+        player.rotY -= e.movementX * 0.0025;
+    }
+});
+
+// Nyílbillentyűs kiegészítő forgatás (ha nincs egér-lock)
+window.addEventListener('keydown', (e) => {
+    if(e.key === "ArrowLeft") inputKeys['rot_left'] = true;
+    if(e.key === "ArrowRight") inputKeys['rot_right'] = true;
+});
+window.addEventListener('keyup', (e) => {
+    if(e.key === "ArrowLeft") inputKeys['rot_left'] = false;
+    if(e.key === "ArrowRight") inputKeys['rot_right'] = false;
+});
+
+// Aktiváljuk a kattintásra induló pointer lockot a precíz célzáshoz
+window.addEventListener('click', () => {
+    renderer.domElement.requestPointerLock();
+});
+
+// ============================================================================
+// DINAMIKUS MOTOR CIKLUS (ANIMÁCIÓ ÉS FIZIKAI ELLENŐRZÉS)
+// ============================================================================
+function updatePhysics() {
+    // Manuális forgás billentyűkkel
+    if (inputKeys['rot_left']) player.rotY += 0.035;
+    if (inputKeys['rot_right']) player.rotY -= 0.035;
+
+    // Irányvektorok kiszámítása (TERMÉSZETES JÁTÉKOS IRÁNY)
+    let moveX = 0;
+    let moveZ = 0;
+    
+    let forwardX = Math.sin(player.rotY);
+    let forwardZ = Math.cos(player.rotY);
+    
+    // W = Előre, S = Hátra, A = Balra strafe, D = Jobbra strafe
+    if (inputKeys['w']) { moveX -= forwardX; moveZ -= forwardZ; }
+    if (inputKeys['s']) { moveX += forwardX; moveZ += forwardZ; }
+    if (inputKeys['a']) { moveX -= forwardZ; moveZ += forwardX; }
+    if (inputKeys['d']) { moveX += forwardZ; moveZ -= forwardX; }
+    
+    // Normalizálás, hogy átlósan se fussunk gyorsabban
+    if (moveX !== 0 || moveZ !== 0) {
+        let length = Math.sqrt(moveX * moveX + moveZ * moveZ);
+        let currentSpeed = inputKeys['shift'] ? player.speed * 1.7 : player.speed;
+        
+        let nextX = player.x + (moveX / length) * currentSpeed;
+        let nextZ = player.z + (moveZ / length) * currentSpeed;
+        
+        // Merev fizikai határok (Nem enged át a bérházak falán)
+        if (nextX > -33 && nextX < 33) {
+            player.x = nextX;
+        }
+        player.z = nextZ;
+    }
+    
+    // Kamera transzformáció frissítése (FPS szemmagasság: 2.6 egység)
+    camera.position.set(player.x, 2.6, player.z);
+    camera.rotation.set(0, player.rotY + Math.PI, 0);
+}
+
+function runEngineLoop() {
+    requestAnimationFrame(runEngineLoop);
+    
+    updatePhysics();
+    
+    renderer.render(scene, camera);
+}
+
+// Motor indítása
+runEngineLoop();
+
+// Képernyőarány fixálása átméretezéskor
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
+<script>
+// Globális tömb a harctéren lévő hús-vér katonáknak
+const npcs = [];
+
+// Katonai egyenruhák és felszerelések professzionális anyagbeállításai
+const germanUniformMat = new THREE.MeshStandardMaterial({ color: 0x525951, roughness: 0.72 }); // Wehrmacht szürke
+const allyUniformMat = new THREE.MeshStandardMaterial({ color: 0x3d4f36, roughness: 0.72 });   // Magyar/Szövetséges zöld
+const skinMaterial = new THREE.MeshStandardMaterial({ color: 0xffdcbe, roughness: 0.65 });     // Arc bőr tónus
+const bootMaterial = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.85 });     // Bőrbakancsok
+const helmetMaterial = new THREE.MeshStandardMaterial({ color: 0x2e332c, roughness: 0.55 });   // Acélsisak
+
+// Összetett 3D karakter-generátor függvény (különálló végtagok az animációhoz)
+function spawnLivingSoldier(type, x, z, speechText) {
+    const soldierGroup = new THREE.Group();
+    
+    // A) TÖRZSE (Minden végtag ehhez viszonyul)
+    const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.35, 0.55), type === 'enemy' ? germanUniformMat : allyUniformMat);
+    torsoMesh.position.y = 1.7;
+    torsoMesh.castShadow = true;
+    torsoMesh.receiveShadow = true;
+    soldierGroup.add(torsoMesh);
+    
+    // B) FEJ ÉS SISAK STRUKTÚRA
+    const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skinMaterial);
+    headMesh.position.set(0, 0.92, 0);
+    headMesh.castShadow = true;
+    
+    const helmetMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.28, 0.22, 10), helmetMaterial);
+    helmetMesh.position.set(0, 1.12, 0);
+    helmetMesh.castShadow = true;
+    
+    torsoMesh.add(headMesh);
+    torsoMesh.add(helmetMesh);
+    
+    // C) MOZGATHATÓ KAROK (Lövéshez és sétatempóhoz)
+    const leftArmGroup = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.05, 0.22), type === 'enemy' ? germanUniformMat : allyUniformMat);
+    leftArmGroup.position.set(-0.55, 0.1, 0);
+    leftArmGroup.castShadow = true;
+    
+    const rightArmGroup = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.05, 0.22), type === 'enemy' ? germanUniformMat : allyUniformMat);
+    rightArmGroup.position.set(0.55, 0.1, 0);
+    rightArmGroup.castShadow = true;
+    
+    torsoMesh.add(leftArmGroup);
+    torsoMesh.add(rightArmGroup);
+    
+    // D) BAL LÁB RENDSZER (Forgáspont a csípőnél az ollózó mozgáshoz)
+    const leftLegContainer = new THREE.Group();
+    const leftLegMesh = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.95, 0.26), type === 'enemy' ? germanUniformMat : allyUniformMat);
+    leftLegMesh.position.y = -0.48;
+    leftLegMesh.castShadow = true;
+    
+    const leftBootMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.42), bootMaterial);
+    leftBootMesh.position.set(0, -0.95, 0.1);
+    leftBootMesh.castShadow = true;
+    
+    leftLegContainer.add(leftLegMesh);
+    leftLegContainer.add(leftBootMesh);
+    leftLegContainer.position.set(-0.24, 1.05, 0); // Csípőcsatlakozás
+    soldierGroup.add(leftLegContainer);
+    
+    // E) JOBB LÁB RENDSZER
+    const rightLegContainer = new THREE.Group();
+    const rightLegMesh = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.95, 0.26), type === 'enemy' ? germanUniformMat : allyUniformMat);
+    rightLegMesh.position.y = -0.48;
+    rightLegMesh.castShadow = true;
+    
+    const rightBootMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.42), bootMaterial);
+    rightBootMesh.position.set(0, -0.95, 0.1);
+    rightBootMesh.castShadow = true;
+    
+    rightLegContainer.add(rightLegMesh);
+    rightLegContainer.add(rightBootMesh);
+    rightLegContainer.position.set(0.24, 1.05, 0); // Csípőcsatlakozás
+    soldierGroup.add(rightLegContainer);
+
+    // F) CSILLOGÓ RECOGNITION TACTICAL ICON (Fej feletti vörös/zöld jelzőpont távoli észleléshez)
+    const tacticalIconGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
+    const tacticalIconMat = new THREE.MeshBasicMaterial({ color: type === 'enemy' ? 0xff0000 : 0x00ff00 });
+    const tacticalIcon = new THREE.Mesh(tacticalIconGeo, tacticalIconMat);
+    tacticalIcon.position.set(0, 2.8, 0);
+    soldierGroup.add(tacticalIcon);
+
+    // Pozicionálás és világba illesztés
+    soldierGroup.position.set(x, 0, z);
+    scene.add(soldierGroup);
+    
+    // Adatszerkezet a mozgásanimációhoz és a későbbi sebzésrendszerhez
+    npcs.push({
+        type: type,
+        mesh: soldierGroup,
+        leftLeg: leftLegContainer,
+        rightLeg: rightLegContainer,
+        torso: torsoMesh,
+        leftArm: leftArmGroup,
+        rightArm: rightArmGroup,
+        hp: 100,
+        speech: speechText,
+        walkTime: Math.random() * 200,
+        startPositionZ: z,
+        patrolRadius: 30 + Math.random() * 15,
+        movementSpeed: 0.045 + Math.random() * 0.025,
+        directionModifier: Math.random() > 0.5 ? 1 : -1
+    });
+}
+
+// 10 DARAB STRATÉGIAILAG ELHELYEZETT JÁRŐR KATONA (Pesti frontvonal)
+spawnLivingSoldier('ally', -6, 90, "Miller közlegény! Jelentem, a bérházak között tiszta a terep, de a Parlamentnél beásták magukat!");
+spawnLivingSoldier('ally', 5, 65, "Vigyázz a romoknál! Orvlövészek vannak a tetőkön!");
+spawnLivingSoldier('enemy', 0, 35, "Achtung! Feindliche Fallschirmjäger gelandet!");
+spawnLivingSoldier('enemy', -9, 5, "Sperrfeuer eröffnen! Keinen Meter zurückweichen!");
+spawnLivingSoldier('enemy', 8, -25, "Sofortige Verstärkung anfordern!");
+spawnLivingSoldier('enemy', -2, -60, "Deckung! Granate kommt!");
+spawnLivingSoldier('enemy', 7, -95, "Halt! Feindkontakt auf der Straße!");
+spawnLivingSoldier('ally', -5, -120, "Tartsátok a kapualjat! Rohamra előre!");
+spawnLivingSoldier('enemy', 3, -150, "Wir müssen die Brückenköpfe sichern!");
+spawnLivingSoldier('enemy', -6, -195, "Verteidigungslinie um jeden Preis halten!");
+
+// FIZIKAI MOTOR KIEGÉSZÍTÉS: NPC mozgás és ollózó lábanimáció vezérlése
+function processLivingNPCAI() {
+    npcs.forEach(npc => {
+        if (npc.hp <= 0) return; // Halott katona nem csinál semmit
+
+        // 1. SÉTÁLÓ PATROL AI LOGIKA
+        npc.mesh.position.z += npc.movementSpeed * npc.directionModifier;
+        npc.walkTime += 0.16; // Animációs belső óra léptetése
+        
+        // Ha túllépi a járőrözési zóna szélét, megfordul
+        if (Math.abs(npc.mesh.position.z - npc.startPositionZ) > npc.patrolRadius) {
+            npc.directionModifier *= -1;
+            // Ha előre megy, 0 fok, ha hátrafelé, 180 fokkal elfordul a teljes test
+            npc.mesh.rotation.y = npc.directionModifier > 0 ? 0 : Math.PI;
+        }
+        
+        // 2. MATEMATIKAI SZINUSZ ALAPÚ LÁB- ÉS KARANIMÁCIÓ (Ollózó mozgás)
+        let swingAngle = Math.sin(npc.walkTime) * 0.65;
+        npc.leftLeg.rotation.x = swingAngle;
+        npc.rightLeg.rotation.x = -swingAngle;
+        
+        // Karok ellentétes ringása a természetes hatásért
+        npc.leftArm.rotation.x = -swingAngle * 0.35;
+        npc.rightArm.rotation.x = swingAngle * 0.35;
+
+        // 3. DINAMIKUS TÁVOLSÁGI AGGRESSZIÓ (Ha a játékos közel merészkedik, a németek rászegezik a tekintetüket)
+        let playerDistance = npc.mesh.position.distanceTo(camera.position);
+        if (npc.type === 'enemy' && playerDistance < 22) {
+            npc.mesh.lookAt(camera.position.x, npc.mesh.position.y, camera.position.z);
+        }
+    });
+}
+
+// AUTOMATIKUS INJEKTÁLÁS A FŐ RENDERING CIKLUSBA
+// Egy másodlagos hurok, ami rácsatlakozik a Three.js-re és folyamatosan frissíti az NPC-ket
+function internalNPCUpdateLoop() {
+    requestAnimationFrame(internalNPCUpdateLoop);
+    
+    // Csak akkor frissítünk, ha a motor fut
+    processLivingNPCAI();
+}
+internalNPCUpdateLoop();
+</script>
+<div id="game-hud-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; box-sizing: border-box; padding: 25px; display: flex; flex-direction: column; justify-content: space-between; z-index: 500;">
+    <div id="hud-header" style="color: #ffff00; font-size: 24px; font-weight: bold; text-shadow: 2px 2px 4px #000; letter-spacing: 1px;">
+        KÜLDETÉS: <span id="mission-objective" style="color: #fff;">ÁTTÖRÉS A BELVÁROSI BARIKÁDON</span><br>
+        <span style="font-size: 13px; color: #aaa; font-weight: normal; letter-spacing: 0px;">EGÉRKATTINTÁS / SPACE: TÜZELÉS | SHIFT: ROST ROHAM SPRINT</span>
+    </div>
+    
+    <div id="subtitle-box" style="position: absolute; top: 20%; left: 50%; transform: translateX(-50%); background: rgba(10, 12, 10, 0.88); color: #fff; padding: 14px 40px; font-size: 17px; border-radius: 4px; border: 2px solid #555; display: none; text-align: center; max-width: 600px; box-shadow: 0 0 15px rgba(0,0,0,0.6); font-family: sans-serif;"></div>
+
+    <div id="hud-footer" style="display: flex; justify-content: space-between; align-items: flex-end; width: 100%;">
+        
+        <div id="moha-health-container" style="display: flex; gap: 8px; background: rgba(0,0,0,0.5); padding: 8px; border-radius: 3px;">
+            <div id="moha-hp-0" class="hud-hp-bar" style="width: 55px; height: 38px; border: 2px solid #00ff00; background-color: rgba(0, 220, 0, 0.65); transition: background 0.1s;"></div>
+            <div id="moha-hp-1" class="hud-hp-bar" style="width: 55px; height: 38px; border: 2px solid #00ff00; background-color: rgba(0, 220, 0, 0.65); transition: background 0.1s;"></div>
+            <div id="moha-hp-2" class="hud-hp-bar" style="width: 55px; height: 38px; border: 2px solid #00ff00; background-color: rgba(0, 220, 0, 0.65); transition: background 0.1s;"></div>
+            <div id="moha-hp-3" class="hud-hp-bar" style="width: 55px; height: 38px; border: 2px solid #00ff00; background-color: rgba(0, 220, 0, 0.65); transition: background 0.1s;"></div>
+        </div>
+        
+        <div id="moha-weapon-card" style="background: linear-gradient(135deg, rgba(20,22,20,0.85) 0%, rgba(5,5,5,0.95) 100%); padding: 12px 25px; border-radius: 4px; color: #fff; font-size: 15px; border: 2px solid #444; text-align: right; min-width: 150px; box-shadow: 0 5px 10px rgba(0,0,0,0.5);">
+            <span id="current-weapon-name" style="font-weight: bold; color: #ffff00; letter-spacing: 1px;">THOMPSON M1A1</span><br>
+            LŐSZER: <span id="ammo-counter" style="font-size: 20px; font-weight: bold; color: #fff;">30 / 120</span>
+        </div>
+        
+        <canvas id="moha-radar" width="140" height="140" style="width: 140px; height: 140px; background: rgba(5, 25, 5, 0.65); border: 3px solid #00ff00; border-radius: 50%; box-shadow: 0 0 15px rgba(0,255,0,0.2);"></canvas>
+    </div>
+</div>
+
+<script>
+// ============================================================================
+// COMBAT ADATOK ÉS HARCÁSZATI STATISZTIKÁK
+// ============================================================================
+let combatState = {
+    hpBlocks: [100, 100, 100, 100],
+    activeBlockIndex: 3,
+    currentAmmo: 30,
+    maxReserveAmmo: 120,
+    triggerPulled: false,
+    lastWeaponFireTime: 0,
+    fireRateInterval: 105 // Gyorstüzelő automata fegyveridőzítés milliszekundumban
+};
+
+// 1. THOMPSON GÉPFEGYVER 3D GEOMETRIA ÉS ÖSSZESZERELÉS
+const weaponSystemGroup = new THREE.Group();
+const gunMetalMat = new THREE.MeshStandardMaterial({ color: 0x1a1c1e, roughness: 0.28, metalness: 0.85 });
+const gunWoodMat = new THREE.MeshStandardMaterial({ color: 0x54331b, roughness: 0.72 });
+
+// Fegyverváz (Main Body)
+let bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.15, 0.65), gunMetalMat);
+weaponSystemGroup.add(bodyMesh);
+
+// Hosszú acél fegyvercső (Barrel)
+let barrelMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.6), gunMetalMat);
+barrelMesh.rotateX(Math.PI / 2);
+barrelMesh.position.set(0, 0.04, -0.5);
+weaponSystemGroup.add(barrelMesh);
+
+// Fa tus / Alkatrész (Stock)
+let stockMesh = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.32), gunWoodMat);
+stockMesh.position.set(0, -0.09, 0.42);
+weaponSystemGroup.add(stockMesh);
+
+// Jellegzetes kerek dobtár (Drum Magazine)
+let magazineMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.09), gunMetalMat);
+magazineMesh.rotateZ(Math.PI / 2);
+magazineMesh.position.set(0, -0.12, -0.08);
+weaponSystemGroup.add(magazineMesh);
+
+// 2. DINAMIKUS TORKOLATTŰZ (MUZZLE FLASH) REPRODUKCIÓ
+let muzzleFlashLight = new THREE.PointLight(0xff9900, 0, 18);
+let flashGeometry = new THREE.SphereGeometry(0.09, 10, 10);
+let flashMaterial = new THREE.MeshBasicMaterial({ color: 0xffea55 });
+let flashVisualMesh = new THREE.Mesh(flashGeometry, flashMaterial);
+flashVisualMesh.position.set(0, 0.04, -0.82);
+flashVisualMesh.visible = false;
+
+weaponSystemGroup.add(flashVisualMesh);
+weaponSystemGroup.add(muzzleFlashLight);
+scene.add(weaponSystemGroup);
+
+// ============================================================================
+// RADAR RENDSZER VEZÉRLÉS (SÁRGA IRÁNYTŰ NYÍL A KÜLDETÉSI CÉL FELÉ)
+// ============================================================================
+const radarCanvasElement = document.getElementById('moha-radar');
+const radarCtx = radarCanvasElement.getContext('2d');
+const finalObjectiveCoordinates = { x: 0, z: -195 }; // A legtávolabbi katona / pont helye
+
+function renderTacticalRadar() {
+    radarCtx.clearRect(0, 0, 140, 140);
+    
+    // Háttér rács körvonalak rajzolása
+    radarCtx.strokeStyle = 'rgba(0, 255, 0, 0.25)';
+    radarCtx.lineWidth = 1;
+    radarCtx.beginPath();
+    radarCtx.arc(70, 70, 66, 0, Math.PI * 2);
+    radarCtx.stroke();
+    radarCtx.beginPath();
+    radarCtx.arc(70, 70, 35, 0, Math.PI * 2);
+    radarCtx.stroke();
+    
+    // Játékos ikonja középen (Kicsi zöld négyzet)
+    radarCtx.fillStyle = '#00ff00';
+    radarCtx.fillRect(68, 68, 4, 4);
+    
+    // SÁRGA NYÍL MATEMATIKAI SZÁMÍTÁSA A CÉL OBJEKTÍVA FELÉ
+    let dx = finalObjectiveCoordinates.x - player.x;
+    let dz = finalObjectiveCoordinates.z - player.z;
+    let absoluteAngle = Math.atan2(dz, dx);
+    // Relatív szög a játékos forgásához képest
+    let relativeAngle = absoluteAngle - player.rotY + Math.PI / 2;
+    
+    radarCtx.save();
+    radarCtx.translate(70, 70);
+    radarCtx.rotate(relativeAngle);
+    
+    // MOHA sárga nyíl alakzat kirajzolása
+    radarCtx.fillStyle = '#ffff00';
+    radarCtx.beginPath();
+    radarCtx.moveTo(0, -54);
+    radarCtx.lineTo(-9, -38);
+    radarCtx.lineTo(9, -38);
+    radarCtx.closePath();
+    radarCtx.fill();
+    
+    radarCtx.restore();
+}
+
+// ============================================================================
+// FEGYVER TÜZELÉSI MECHANIZMUS ÉS RAYCAST SEBZÉS DETEKTÁLÁS
+// ============================================================================
+function executeWeaponFireEvent() {
+    let currentTime = Date.now();
+    if (currentTime - combatState.lastWeaponFireTime < combatState.fireRateInterval) return;
+    if (combatState.currentAmmo <= 0) return;
+
+    combatState.currentAmmo--;
+    combatState.lastWeaponFireTime = currentTime;
+    document.getElementById('ammo-counter').innerText = combatState.currentAmmo + " / 120";
+
+    // Fegyver visszarúgás (hátralökődés vizuális szimulációja)
+    weaponSystemGroup.position.z += 0.09;
+    weaponSystemGroup.position.y += 0.025;
+
+    // Torkolattűz felvillantása
+    flashVisualMesh.visible = true;
+    muzzleFlashLight.intensity = 4.5;
+
+    // SUGÁRKÖVETÉSES TALÁLAT-ELLENŐRZÉS (Raycasting)
+    const combatRaycaster = new THREE.Raycaster();
+    // A képernyő mértani középpontjából (célkereszt) indítjuk a sugarat a kamera irányába
+    combatRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    
+    npcs.forEach(soldier => {
+        if (soldier.hp <= 0) return; // Halott katonát már nem lehet lőni
+        
+        let intersections = combatRaycaster.intersectObject(soldier.mesh, true);
+        if (intersections.length > 0) {
+            soldier.hp -= 34; // 3 találat teríti le a katonát porig
+            
+            // Ha a katona életereje elfogy, aktiválódik a fizikai halál-animáció
+            if (soldier.hp <= 0) {
+                soldier.mesh.rotation.z = Math.PI / 2; // Oldalára dől
+                soldier.mesh.position.y = 0.35;         // Lefekszik a földre
+                soldier.mesh.children[4].visible = false; // Taktikai ikon lekapcsolása
+            }
+        }
+    });
+
+    // Rendkívül gyors lekapcsolási időzítő a villanásnak, hogy ne égjen be
+    setTimeout(() => {
+        flashVisualMesh.visible = false;
+        muzzleFlashLight.intensity = 0;
+    }, 35);
+}
+
+// KÖZELÍTÉSI SZÖVEG MEGJELENÍTŐ (Ha oda mész egy katonához, kiírja amit mond)
+function checkSubtitlesAndDialogues() {
+    let activeSpeech = null;
+    npcs.forEach(soldier => {
+        let distance = soldier.mesh.position.distanceTo(camera.position);
+        if (distance < 14 && soldier.hp > 0) {
+            activeSpeech = soldier.speech;
+        }
+    });
+
+    const subBox = document.getElementById('subtitle-box');
+    if (activeSpeech) {
+        subBox.innerText = activeSpeech;
+        subBox.style.display = 'block';
+    } else {
+        subBox.style.display = 'none';
+    }
+}
+
+// Input eseménykezelők rákötése az automata tüzelésre
+window.addEventListener('mousedown', (e) => {
+    if (document.pointerLockElement === renderer.domElement) combatState.triggerPulled = true;
+});
+window.addEventListener('mouseup', () => { combatState.triggerPulled = false; });
+window.addEventListener('keydown', (e) => { if (e.key === " " || e.key === "Square") combatState.triggerPulled = true; });
+window.addEventListener('keyup', (e) => { if (e.key === " " || e.key === "Square") combatState.triggerPulled = false; });
+
+// ============================================================================
+// HARMADIK RÉSZ FŐ FRISSÍTÉSI HUROK (ZÖKKENŐMENTES INTEGRÁCIÓ)
+// ============================================================================
+function advancedWeaponAndHudLoop() {
+    requestAnimationFrame(advancedWeaponAndHudLoop);
+    
+    // A 3D fegyvermodell precíz szinkronizálása a játékos kamerájával
+    weaponSystemGroup.position.copy(camera.position);
+    weaponSystemGroup.rotation.copy(camera.rotation);
+    
+    // FPS elhelyezési transzformációk (Jobb alsó sarok, mint a valódi MOH-ban)
+    weaponSystemGroup.translateZ(-0.55);
+    weaponSystemGroup.translateY(-0.25);
+    weaponSystemGroup.translateX(0.15);
+    
+    // Realisztikus fegyverlengés (Bobbing effektus) lépkedés/futás közben
+    if (inputKeys['w'] || inputKeys['s'] || inputKeys['a'] || inputKeys['d']) {
+        let waveFactor = inputKeys['shift'] ? 0.014 : 0.007;
+        let speedFactor = inputKeys['shift'] ? 0.012 : 0.006;
+        let timeClock = Date.now() * speedFactor;
+        
+        weaponSystemGroup.position.y += Math.sin(timeClock) * waveFactor;
+        weaponSystemGroup.position.x += Math.cos(timeClock * 0.5) * (waveFactor * 0.7);
+    }
+    
+    // Finom visszatérési interpoláció (Lerp) tüzelési visszarúgás után
+    weaponSystemGroup.position.z = THREE.MathUtils.lerp(weaponSystemGroup.position.z, weaponSystemGroup.position.z, 0.12);
+
+    // Folyamatos automata sorozatlövés kezelése
+    if (combatState.triggerPulled) {
+        executeWeaponFireEvent();
+    }
+    
+    // Interfész elemek folyamatos újrarajzolása
+    renderTacticalRadar();
+    checkSubtitlesAndDialogues();
+}
+
+// Hurok elindítása a háttérben
+advancedWeaponAndHudLoop();
+</script>
+<script>
+// Globális tömbök a lövedékeknek és a robbanás részecskéknek
+const tankShells = [];
+const explosionParticles = [];
+let tankObject = null;
+
+// Tank anyagbeállításai (Katonai terep-kamuflázs és lánctalp fém)
+const tankCamouflageMat = new THREE.MeshStandardMaterial({ color: 0x444133, roughness: 0.85, metalness: 0.2 }); // Sötét homoksárga
+const tankTrackMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9, metalness: 0.7 });      // Koptatott acél
+const shellMat = new THREE.MeshBasicMaterial({ color: 0xff3300 });                                           // Izzó lövedék
+
+// 1. TIGER TANK RÉSZLETES 3D ÖSSZESZERELÉSE
+function spawnHeavyTigerTank(x, z) {
+    const tankGroup = new THREE.Group();
+    
+    // A) Páncélos test (Chassis)
+    const bodyGeo = new THREE.BoxGeometry(4.5, 1.4, 7.0);
+    const bodyMesh = new THREE.Mesh(bodyGeo, tankCamouflageMat);
+    bodyMesh.position.y = 1.0;
+    bodyMesh.castShadow = true;
+    bodyMesh.receiveShadow = true;
+    tankGroup.add(bodyMesh);
+    
+    // B) Bal oldali lánctalp (Left Track)
+    const leftTrackGeo = new THREE.BoxGeometry(0.8, 1.0, 7.2);
+    const leftTrack = new THREE.Mesh(leftTrackGeo, tankTrackMat);
+    leftTrack.position.set(-2.4, 0.5, 0);
+    leftTrack.castShadow = true;
+    tankGroup.add(leftTrack);
+    
+    // C) Jobb oldali lánctalp (Right Track)
+    const rightTrackGeo = new THREE.BoxGeometry(0.8, 1.0, 7.2);
+    const rightTrack = new THREE.Mesh(rightTrackGeo, tankTrackMat);
+    rightTrack.position.set(2.4, 0.5, 0);
+    rightTrack.castShadow = true;
+    tankGroup.add(rightTrack);
+    
+    // D) FORGATHATÓ LÖVEGTORONY (Turret Base) - Külön csoport, hogy tudjon forogni!
+    const turretGroup = new THREE.Group();
+    turretGroup.position.set(0, 1.7, -0.5); // A forgáspont a tank tetején
+    
+    const turretGeo = new THREE.BoxGeometry(2.8, 0.9, 3.2);
+    const turretMesh = new THREE.Mesh(turretGeo, tankCamouflageMat);
+    turretMesh.position.y = 0.45;
+    turretMesh.castShadow = true;
+    turretGroup.add(turretMesh);
+    
+    // E) HOSSZÚ ÁGYÚCSŐ (Main Cannon Barrel)
+    const barrelGeo = new THREE.CylinderGeometry(0.12, 0.16, 4.2, 8);
+    const barrelMesh = new THREE.Mesh(barrelGeo, tankCamouflageMat);
+    barrelMesh.rotateX(Math.PI / 2); // Előre nézzen
+    barrelMesh.position.set(0, 0.45, -3.2); // Kinyúlik a toronyból előre
+    barrelMesh.castShadow = true;
+    turretGroup.add(barrelMesh);
+    
+    tankGroup.add(turretGroup);
+    
+    // Elhelyezés a pesti utcán
+    tankGroup.position.set(x, 0, z);
+    scene.add(tankGroup);
+    
+    // Tank adatszerkezet az AI célzáshoz
+    tankObject = {
+        mesh: tankGroup,
+        turret: turretGroup,
+        hp: 500,
+        lastShotTime: 0,
+        shootCooldown: 3000 // 3 másodpercenként tüzel egyet a játékosra
+    };
+}
+
+// Spawnoljuk le a Tiger tankot a pesti utca legvégére, a barikád mögé!
+spawnHeavyTigerTank(0, -170);
+
+// 2. RÉSZECSKERENDSZERES ROBBANÁS GENERÁTOR (Explosion Particle Spawner)
+function spawnExplosionEffect(x, y, z) {
+    const particleCount = 30;
+    const particleGeo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+    
+    for(let i = 0; i < particleCount; i++) {
+        // Véletlenszerű színátmenet a tűz és a reppesz között
+        const pMat = new THREE.MeshBasicMaterial({
+            color: Math.random() > 0.4 ? 0xffaa00 : 0xff3300,
+            transparent: true,
+            opacity: 1.0
+        });
+        
+        const pMesh = new THREE.Mesh(particleGeo, pMat);
+        pMesh.position.set(x, y, z);
+        scene.add(pMesh);
+        
+        // Kilökődési sebesség vektorok minden irányba
+        explosionParticles.push({
+            mesh: pMesh,
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: (Math.random() * 0.3) + 0.1, // Felfelé repüljenek leginkább
+            vz: (Math.random() - 0.5) * 0.4,
+            life: 1.0,
+            decay: 0.03 + Math.random() * 0.02
+        });
+    }
+}
+
+// 3. TANK ÁGYÚLÖVEDÉK KILÖVÉSE
+function fireTankCannon() {
+    if (!tankObject || tankObject.hp <= 0) return;
+    
+    // Megkeressük az ágyúcső végét a világ koordinátáiban
+    const barrelTip = new THREE.Vector3(0, 0.45, -5.2);
+    barrelTip.applyMatrix4(tankObject.turret.matrixWorld);
+    
+    // Lövedék 3D modellje
+    const shellGeo = new THREE.SphereGeometry(0.25, 8, 8);
+    const shellMesh = new THREE.Mesh(shellGeo, shellMat);
+    shellMesh.position.copy(barrelTip);
+    scene.add(shellMesh);
+    
+    // Kiszámítjuk az irányvektort a játékos (kamera) felé
+    const targetDir = new THREE.Vector3();
+    targetDir.subVectors(camera.position, barrelTip).normalize();
+    
+    tankShells.push({
+        mesh: shellMesh,
+        dir: targetDir,
+        speed: 0.85 // Brutális sebességgel száguldó lövedék
+    });
+    
+    // Egyből indítunk egy torkolattüzet a tank csövénél is
+    spawnExplosionEffect(barrelTip.x, barrelTip.y, barrelTip.z);
+}
+
+// 4. JÁTÉKOS SEBZÉS ÉS HUD BLOKK FRISSÍTÉS
+function damagePlayer() {
+    if (combatState.activeBlockIndex < 0) return; // Már meghalt
+    
+    combatState.hpBlocks[combatState.activeBlockIndex] -= 35;
+    
+    // Ha az aktuális zöld blokk elfogyott, ugrunk a következőre
+    if (combatState.hpBlocks[combatState.activeBlockIndex] <= 0) {
+        const currentBlockUI = document.getElementById('moha-hp-' + combatState.activeBlockIndex);
+        if (currentBlockUI) {
+            currentBlockUI.style.backgroundColor = 'rgba(255, 0, 0, 0.2)'; // Elhasznált blokk piros lesz
+            currentBlockUI.style.borderColor = '#550000';
+        }
+        combatState.activeBlockIndex--;
+    } else {
+        // Ha még van benne élet, csak halványítjuk a zöldjét
+        const currentBlockUI = document.getElementById('moha-hp-' + combatState.activeBlockIndex);
+        if (currentBlockUI) {
+            currentBlockUI.style.backgroundColor = `rgba(0, 220, 0, ${combatState.hpBlocks[combatState.activeBlockIndex] / 100})`;
+        }
+    }
+    
+    // MEGHALT A JÁTÉKOS (Game Over ellenőrzés)
+    if (combatState.activeBlockIndex < 0) {
+        document.getElementById('mission-objective').innerText = "MEGHALTÁL A HARCBAN! FRISSÍTS AZ ÚJRAINDÍTÁSHOZ!";
+        document.getElementById('mission-objective').style.color = "#ff0000";
+        player.speed = 0; // Megállítjuk a mozgást
+    }
+}
+
+// 5. TANK ENGINE ÉS ROBBANÁSI ANIMÁCIÓS CIKLUS
+function processTankAndExplosions() {
+    let now = Date.now();
+    
+    if (tankObject && tankObject.hp > 0) {
+        // TANK AI: Lövegtorony lassan rácéloz a játékos pozíciójára
+        // Csak az Y tengely körüli forgást módosítjuk, hogy kövesse a mozgásod
+        let targetAngle = Math.atan2(camera.position.x - tankObject.mesh.position.x, camera.position.z - tankObject.mesh.position.z);
+        // Finom forgatás interpolációval (Lerp), hogy ne rángatózzon a torony
+        tankObject.turret.rotation.y = THREE.MathUtils.lerp(tankObject.turret.rotation.y, targetAngle + Math.PI, 0.03);
+        
+        // TÜZELÉSI LOGIKA: Ha a játékos 120 egységnél közelebb ér, a tank lőni kezd!
+        let distToPlayer = tankObject.mesh.position.distanceTo(camera.position);
+        if (distToPlayer < 130 && now - tankObject.lastShotTime > tankObject.shootCooldown) {
+            fireTankCannon();
+            tankObject.lastShotTime = now;
+        }
+    }
+    
+    // ÁGYÚLÖVEDÉKEK REPTETÉSE ÉS BECSAPÓDÁSA
+    for (let i = tankShells.length - 1; i >= 0; i--) {
+        let shell = tankShells[i];
+        shell.mesh.position.x += shell.dir.x * shell.speed;
+        shell.mesh.position.y += shell.dir.y * shell.speed;
+        shell.mesh.position.z += shell.dir.z * shell.speed;
+        
+        // Ellenőrizzük, hogy eltalálta-e a játékost (kamera távolság)
+        let distToPlayer = shell.mesh.position.distanceTo(camera.position);
+        if (distToPlayer < 3.0) {
+            damagePlayer(); // Sebződik a játékos
+            spawnExplosionEffect(shell.mesh.position.x, shell.mesh.position.y, shell.mesh.position.z);
+            scene.remove(shell.mesh);
+            tankShells.splice(i, 1);
+            continue;
+        }
+        
+        // Becsapódás a földbe vagy a határokba
+        if (shell.mesh.position.y <= 0.1 || Math.abs(shell.mesh.position.z) > 400) {
+            spawnExplosionEffect(shell.mesh.position.x, shell.mesh.position.y, shell.mesh.position.z);
+            scene.remove(shell.mesh);
+            tankShells.splice(i, 1);
+        }
+    }
+    
+    // ROBBANÁS RÉSZECSKÉK ANIMÁLÁSA (Gravitáció és elhalványulás)
+    for (let j = explosionParticles.length - 1; j >= 0; j--) {
+        let p = explosionParticles[j];
+        p.mesh.position.x += p.vx;
+        p.mesh.position.y += p.vy;
+        p.mesh.position.z += p.vz;
+        
+        p.vy -= 0.015; // Gravitációs húzás lefelé
+        p.life -= p.decay;
+        p.mesh.material.opacity = p.life;
+        
+        if (p.life <= 0) {
+            scene.remove(p.mesh);
+            p.mesh.geometry.dispose();
+            p.mesh.material.dispose();
+            explosionParticles.splice(j, 1);
+        }
+    }
+}
+
+// A TANK ÉS ROBBANÁSI MECHANIZMUS RÁKÖTÉSE A RENDER HUROKRA
+function tankEngineUpdateLoop() {
+    requestAnimationFrame(tankEngineUpdateLoop);
+    processTankAndExplosions();
+}
+tankEngineUpdateLoop();
+</script>
+<script>
+// Globális változók a hangrendszernek és a rombolható objektumoknak
+let warSirenContext = null;
+let warSirenOscillator = null;
+const breakableBarricades = [];
+let missionCompleted = false;
+
+// 1. PROFI BEÉPÍTETT AUDIO SZINTETIZÁTOR (Igazi hullámzó szirénahang a háttérben)
+function startAirRaidSiren() {
+    if (warSirenContext) return; // Már fut
+    
+    try {
+        // Inicializáljuk a böngésző audio motorját
+        warSirenContext = new (window.AudioContext || window.webkitAudioContext)();
+        warSirenOscillator = warSirenContext.createOscillator();
+        const sirenGain = warSirenContext.createGain();
+        
+        // Szinuszos alap hanghullám
+        warSirenOscillator.type = 'sine';
+        warSirenOscillator.frequency.setValueAtTime(300, warSirenContext.currentTime); // Alapfrekvencia
+        
+        // Hangerő finomítása, hogy ne legyen túl fülsiketítő
+        sirenGain.gain.setValueAtTime(0.08, warSirenContext.currentTime);
+        
+        warSirenOscillator.connect(sirenGain);
+        sirenGain.connect(warSirenContext.destination);
+        warSirenOscillator.start();
+        
+        // MATEMATIKAI MODULÁCIÓ: Folyamatosan hullámoztatjuk a frekvenciát fel-alá (Légiriadó effekt)
+        function modulateSiren() {
+            if (!warSirenOscillator) return;
+            let time = warSirenContext.currentTime;
+            // Szép lassú hullámzás 250 Hz és 450 Hz között
+            let currentFreq = 350 + Math.sin(time * 1.5) * 100;
+            warSirenOscillator.frequency.setValueAtTime(currentFreq, time);
+            requestAnimationFrame(modulateSiren);
+        }
+        modulateSiren();
+        
+    } catch(e) {
+        console.log("Audio nem támogatott vagy blokkolva van.");
+    }
+}
+
+// Az első kattintásra (amikor bezárul az egér) elindítjuk a háborús hangulatot!
+window.addEventListener('click', () => {
+    startAirRaidSiren();
+});
+
+// 2. ROMBOLHATÓ BARIKÁD RENDSZER GENERÁLÁSA
+const woodMaterialRef = new THREE.MeshStandardMaterial({ color: 0x422a1d, roughness: 0.9 });
+function spawnDestructibleBarricade(x, z) {
+    const barricadeGroup = new THREE.Group();
+    
+    // 3 darab egymásra pakolt nehéz gerenda
+    for(let i = 0; i < 3; i++) {
+        const beamGeo = new THREE.BoxGeometry(9.0, 0.4, 0.4);
+        const beamMesh = new THREE.Mesh(beamGeo, woodMaterialRef);
+        beamMesh.position.y = 0.2 + (i * 0.45);
+        beamMesh.castShadow = true;
+        beamMesh.receiveShadow = true;
+        barricadeGroup.add(beamMesh);
+    }
+    
+    barricadeGroup.position.set(x, 0, z);
+    scene.add(barricadeGroup);
+    
+    breakableBarricades.push({
+        mesh: barricadeGroup,
+        hp: 150, // 5 Thompson lövés kell a szétveréséhez
+        zPos: z
+    });
+    
+    // Hozzáadjuk a fizikai ütközés listához is, hogy ne lehessen átsétálni rajta
+    collidableMeshList.push(barricadeGroup.children[0]);
+}
+
+// Lerakjuk a barikádot a pesti utca közepére (-100-as Z pozícióhoz)
+spawnDestructibleBarricade(0, -100);
+
+// KIEGÉSZÍTETT FEGYVER-LÖVÉS DETEKTÁLÁS (Rákapcsolódunk az előző rész lövés funkciójára)
+// Megnézzük, hogy a játékos eltalálta-e a barikádot
+window.addEventListener('mousedown', () => {
+    if (document.pointerLockElement !== renderer.domElement) return;
+    
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+    
+    for (let b = breakableBarricades.length - 1; b >= 0; b--) {
+        let bar = breakableBarricades[b];
+        if (bar.hp <= 0) continue;
+        
+        let intersects = raycaster.intersectObject(bar.mesh, true);
+        if (intersects.length > 0) {
+            bar.hp -= 30;
+            // Szikra/faforgács effekt a találat helyén
+            spawnExplosionEffect(intersects[0].point.x, intersects[0].point.y, intersects[0].point.z);
+            
+            // Ha szétesett a barikád
+            if (bar.hp <= 0) {
+                // Látványosan szétlökjük a gerendákat
+                bar.mesh.children.forEach((beam, idx) => {
+                    beam.position.y -= 0.2;
+                    beam.position.z += (idx - 1) * 0.5;
+                    beam.rotation.z += 0.4;
+                });
+                // Eltávolítjuk az ütközéslistából, hogy át lehessen menni
+                let index = collidableMeshList.indexOf(bar.mesh.children[0]);
+                if (index > -1) collidableMeshList.splice(index, 1);
+                
+                document.getElementById('mission-objective').innerText = "BARIKÁD ÁTTÖRVE! NYOMULJ A PARLAMENT FELÉ!";
+                document.getElementById('mission-objective').style.color = "#00ff00";
+            }
+        }
+    }
+});
+
+// 3. GYŐZELMI KONDÍCIÓ ÉS VÉGSŐ JÁTÉKMENET ELLENŐRZŐ MOTOR
+function checkVictoryCondition() {
+    if (missionCompleted) return;
+    
+    // Ha a játékos eléri az utca végét (Z = -185 környéke, a Parlament sarka)
+    if (player.z <= -185) {
+        missionCompleted = true;
+        player.speed = 0; // Leállítjuk a mozgást
+        
+        // Kikapcsoljuk a szirénát
+        if (warSirenOscillator) {
+            warSirenOscillator.stop();
+            warSirenOscillator = null;
+        }
+        
+        // Hatalmas győzelmi felirat a HUD-ra
+        document.getElementById('mission-objective').innerText = "KÜLDETÉS TELJESÍTVE! BUDAPEST FELSZABADÍTVA!";
+        document.getElementById('mission-objective').style.color = "#00ff00";
+        
+        // Elárasztjuk a csatateret győzelmi tüzijátékkal (robbanásokkal)
+        for(let i = 0; i < 5; i++) {
+            setTimeout(() => {
+                spawnExplosionEffect((Math.random() - 0.5) * 20, 5 + Math.random() * 5, -190 + (Math.random() * 10));
+            }, i * 400);
+        }
+    }
+}
+
+// BELSŐ AUTOMATA LOGIKAI HUROK AZ 5. RÉSZHEZ
+function extensionFinalSystemLoop() {
+    requestAnimationFrame(extensionFinalSystemLoop);
+    checkVictoryCondition();
+}
+extensionFinalSystemLoop();
+</script>
+<script>
+// Globális változók az időjáráshoz és a fegyverváltáshoz
+const rainParticles = [];
+let currentWeaponIndex = 0; // 0: Thompson, 1: Colt .45
+let coltVisualGroup = null;
+
+let weaponInventory = [
+    { name: "THOMPSON M1A1", ammo: 30, maxAmmo: 120, fireRate: 105, damage: 34, automatic: true },
+    { name: "COLT .45 PISTOL", ammo: 7, maxAmmo: 56, fireRate: 300, damage: 50, automatic: false }
+];
+
+// 1. COLT .45 TISZTI PISZTOLY 3D GEOMETRIA ÉS ÖSSZESZERELÉS
+function buildColtPistolModel() {
+    coltVisualGroup = new THREE.Group();
+    const blueSteelMat = new THREE.MeshStandardMaterial({ color: 0x2a2c2e, roughness: 0.2, metalness: 0.9 });
+    const gripWoodMat = new THREE.MeshStandardMaterial({ color: 0x422816, roughness: 0.8 });
+
+    // Pisztoly szán (Slide)
+    const slideMesh = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.32), blueSteelMat);
+    slideMesh.position.set(0, 0.03, -0.05);
+    coltVisualGroup.add(slideMesh);
+
+    // Pisztoly markolat (Grip)
+    const gripMesh = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.14, 0.06), gripWoodMat);
+    gripMesh.position.set(0, -0.06, 0.04);
+    gripMesh.rotation.x = 0.25; // Enyhén döntött markolat a realisztikus fogásért
+    coltVisualGroup.add(gripMesh);
+
+    // Cső torkolat (Barrel)
+    const barrelMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.15), blueSteelMat);
+    barrelMesh.rotateX(Math.PI / 2);
+    barrelMesh.position.set(0, 0.03, -0.18);
+    coltVisualGroup.add(barrelMesh);
+
+    // Alapból láthatatlanra állítjuk, mert a Thompsonnal kezdünk
+    coltVisualGroup.visible = false;
+    scene.add(coltVisualGroup);
+}
+buildColtPistolModel();
+
+// 2. 3D ESŐ- ÉS PORVIHAR GENERÁTOR ENGINE
+function init3DRainStormSystem() {
+    const rainCount = 500; // 500 darab valós időben kalkulált esőcsepp
+    const rainGeo = new THREE.CylinderGeometry(0.01, 0.01, 0.8, 4);
+    const rainMat = new THREE.MeshBasicMaterial({ color: 0x778899, transparent: true, opacity: 0.4 });
+
+    for (let i = 0; i < rainCount; i++) {
+        const drop = new THREE.Mesh(rainGeo, rainMat);
+        
+        // Elszórjuk őket a pesti utca felett a magasban
+        drop.position.set(
+            (Math.random() - 0.5) * 90,
+            10 + Math.random() * 40,
+            player.z + (Math.random() - 0.5) * 200
+        );
+        
+        // Enyhén megdöntjük a cseppeket, mintha fújna a szél
+        drop.rotation.z = -0.15;
+
+        scene.add(drop);
+        rainParticles.push(drop);
+    }
+}
+init3DRainStormSystem();
+
+// IDŐJÁRÁS ÉS VILLÁMLÁS ANIMÁCIÓS INTERPOLÁCIÓ
+function updateWeatherSystem() {
+    // Esőcseppek hullatása lefelé + szélmozgás oldalra
+    rainParticles.forEach(drop => {
+        drop.position.y -= 0.6; // Esési sebesség
+        drop.position.x += 0.05; // Szélirány vektor
+
+        // Ha földet ér, visszarakjuk a magasba a játékos köré
+        if (drop.position.y < 0) {
+            drop.position.y = 40 + Math.random() * 10;
+            drop.position.x = (Math.random() - 0.5) * 90;
+            drop.position.z = player.z + (Math.random() - 0.5) * 200;
+        }
+    });
+
+    // DINAMIKUS VILLÁMLÁS EFFEKT (Véletlenszerű hangulati felvillanás)
+    if (Math.random() > 0.997) {
+        ambientLight.intensity = 3.5; // Hirtelen fénylökés
+        setTimeout(() => {
+            ambientLight.intensity = 0.5; // Visszaáll az alap szürkületre
+        }, 60);
+    }
+}
+
+// 3. WEAPON INVENTORY SWITCHER (Fegyverváltás lekezelése billentyűre)
+window.addEventListener('keydown', (e) => {
+    if (e.key === "1") {
+        // Thompson kiválasztása
+        currentWeaponIndex = 0;
+        weaponSystemGroup.visible = true;
+        if (coltVisualGroup) coltVisualGroup.visible = false;
+        updateWeaponHUD();
+    }
+    if (e.key === "2") {
+        // Colt .45 kiválasztása
+        currentWeaponIndex = 1;
+        weaponSystemGroup.visible = false;
+        if (coltVisualGroup) coltVisualGroup.visible = true;
+        updateWeaponHUD();
+    }
+});
+
+function updateWeaponHUD() {
+    const currentWpn = weaponInventory[currentWeaponIndex];
+    document.getElementById('current-weapon-name').innerText = currentWpn.name;
+    document.getElementById('ammo-counter').innerText = currentWpn.ammo + " / " + currentWpn.maxAmmo;
+}
+
+// KORRIGÁLT KÖZÖS TÜZELÉSI INTEGRÁCIÓ (Felülírjuk az automata fegyverkezelést az új adatokkal)
+function processAdvancedCombatInput() {
+    let now = Date.now();
+    let currentWpn = weaponInventory[currentWeaponIndex];
+    
+    if (!combatState.triggerPulled) return;
+    if (now - combatState.lastWeaponFireTime < currentWpn.fireRate) return;
+    if (currentWpn.ammo <= 0) return;
+
+    // Lőszer csökkentés az inventoryban
+    currentWpn.ammo--;
+    combatState.lastWeaponFireTime = now;
+    document.getElementById('ammo-counter').innerText = currentWpn.ammo + " / " + currentWpn.maxAmmo;
+
+    // Vizuális effektek kiváltása fegyvertől függően
+    if (currentWeaponIndex === 0) {
+        // Thompson mozgás
+        weaponSystemGroup.position.z += 0.09;
+        flashVisualMesh.position.set(0, 0.04, -0.82);
+    } else {
+        // Colt mozgás (Nagyobb hátralökődés, tiszti fegyver!)
+        coltVisualGroup.position.z += 0.12;
+        coltVisualGroup.position.y += 0.04;
+        flashVisualMesh.position.set(0, 0.03, -0.25);
+    }
+
+    // Villanás aktiválása
+    flashVisualMesh.visible = true;
+    muzzleFlashLight.intensity = 5.0;
+
+    // Sebzés kiosztása az aktuális fegyver erejével (A Colt erősebbet sebez!)
+    const targetRaycaster = new THREE.Raycaster();
+    targetRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    
+    npcs.forEach(soldier => {
+        if (soldier.hp <= 0) return;
+        let intersects = targetRaycaster.intersectObject(soldier.mesh, true);
+        if (intersects.length > 0) {
+            soldier.hp -= currentWpn.damage;
+            if (soldier.hp <= 0) {
+                soldier.mesh.rotation.z = Math.PI / 2;
+                soldier.mesh.position.y = 0.35;
+                soldier.mesh.children[4].visible = false;
+            }
+        }
+    });
+
+    // Ha a Colt nem automata, akkor egy kattintás = egy lövés, elengedjük a ravaszt automatikusan
+    if (!currentWpn.automatic) {
+        combatState.triggerPulled = false;
+    }
+
+    setTimeout(() => {
+        flashVisualMesh.visible = false;
+        muzzleFlashLight.intensity = 0;
+    }, 40);
+}
+
+// 4. WEAPON INVENTORY AUTOMATA POZÍCIONÁLÓ CIKLUS
+function inventoryEngineLoop() {
+    requestAnimationFrame(inventoryEngineLoop);
+    
+    // Időjárás futtatása
+    updateWeatherSystem();
+    
+    // Tüzelés ellenőrzése
+    processAdvancedCombatInput();
+    
+    // Ha a Colt van kézben, azt is szinkronizáljuk a kamerával pozícióban
+    if (currentWeaponIndex === 1 && coltVisualGroup) {
+        coltVisualGroup.position.copy(camera.position);
+        coltVisualGroup.rotation.copy(camera.rotation);
+        
+        coltVisualGroup.translateZ(-0.4);
+        coltVisualGroup.translateY(-0.18);
+        coltVisualGroup.translateX(0.12);
+        
+        // Colt finom imbolgása séta közben
+        if (inputKeys['w'] || inputKeys['s'] || inputKeys['a'] || inputKeys['d']) {
+            let t = Date.now() * 0.006;
+            coltVisualGroup.position.y += Math.sin(t) * 0.004;
+        }
+        
+        // Lerp visszatérés visszarúgásból
+        coltVisualGroup.position.z = THREE.MathUtils.lerp(coltVisualGroup.position.z, coltVisualGroup.position.z, 0.15);
+    }
+}
+inventoryEngineLoop();
+</script>
+<script>
+// Globális változók az időjáráshoz és a fegyverváltáshoz
+const rainParticles = [];
+let currentWeaponIndex = 0; // 0: Thompson, 1: Colt .45
+let coltVisualGroup = null;
+
+let weaponInventory = [
+    { name: "THOMPSON M1A1", ammo: 30, maxAmmo: 120, fireRate: 105, damage: 34, automatic: true },
+    { name: "COLT .45 PISTOL", ammo: 7, maxAmmo: 56, fireRate: 300, damage: 50, automatic: false }
+];
+
+// 1. COLT .45 TISZTI PISZTOLY 3D GEOMETRIA ÉS ÖSSZESZERELÉS
+function buildColtPistolModel() {
+    coltVisualGroup = new THREE.Group();
+    const blueSteelMat = new THREE.MeshStandardMaterial({ color: 0x2a2c2e, roughness: 0.2, metalness: 0.9 });
+    const gripWoodMat = new THREE.MeshStandardMaterial({ color: 0x422816, roughness: 0.8 });
+
+    // Pisztoly szán (Slide)
+    const slideMesh = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.32), blueSteelMat);
+    slideMesh.position.set(0, 0.03, -0.05);
+    coltVisualGroup.add(slideMesh);
+
+    // Pisztoly markolat (Grip)
+    const gripMesh = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.14, 0.06), gripWoodMat);
+    gripMesh.position.set(0, -0.06, 0.04);
+    gripMesh.rotation.x = 0.25; // Enyhén döntött markolat a realisztikus fogásért
+    coltVisualGroup.add(gripMesh);
+
+    // Cső torkolat (Barrel)
+    const barrelMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.15), blueSteelMat);
+    barrelMesh.rotateX(Math.PI / 2);
+    barrelMesh.position.set(0, 0.03, -0.18);
+    coltVisualGroup.add(barrelMesh);
+
+    // Alapból láthatatlanra állítjuk, mert a Thompsonnal kezdünk
+    coltVisualGroup.visible = false;
+    scene.add(coltVisualGroup);
+}
+buildColtPistolModel();
+
+// 2. 3D ESŐ- ÉS PORVIHAR GENERÁTOR ENGINE
+function init3DRainStormSystem() {
+    const rainCount = 500; // 500 darab valós időben kalkulált esőcsepp
+    const rainGeo = new THREE.CylinderGeometry(0.01, 0.01, 0.8, 4);
+    const rainMat = new THREE.MeshBasicMaterial({ color: 0x778899, transparent: true, opacity: 0.4 });
+
+    for (let i = 0; i < rainCount; i++) {
+        const drop = new THREE.Mesh(rainGeo, rainMat);
+        
+        // Elszórjuk őket a pesti utca felett a magasban
+        drop.position.set(
+            (Math.random() - 0.5) * 90,
+            10 + Math.random() * 40,
+            player.z + (Math.random() - 0.5) * 200
+        );
+        
+        // Enyhén megdöntjük a cseppeket, mintha fújna a szél
+        drop.rotation.z = -0.15;
+
+        scene.add(drop);
+        rainParticles.push(drop);
+    }
+}
+init3DRainStormSystem();
+
+// IDŐJÁRÁS ÉS VILLÁMLÁS ANIMÁCIÓS INTERPOLÁCIÓ
+function updateWeatherSystem() {
+    // Esőcseppek hullatása lefelé + szélmozgás oldalra
+    rainParticles.forEach(drop => {
+        drop.position.y -= 0.6; // Esési sebesség
+        drop.position.x += 0.05; // Szélirány vektor
+
+        // Ha földet ér, visszarakjuk a magasba a játékos köré
+        if (drop.position.y < 0) {
+            drop.position.y = 40 + Math.random() * 10;
+            drop.position.x = (Math.random() - 0.5) * 90;
+            drop.position.z = player.z + (Math.random() - 0.5) * 200;
+        }
+    });
+
+    // DINAMIKUS VILLÁMLÁS EFFEKT (Véletlenszerű hangulati felvillanás)
+    if (Math.random() > 0.997) {
+        ambientLight.intensity = 3.5; // Hirtelen fénylökés
+        setTimeout(() => {
+            ambientLight.intensity = 0.5; // Visszaáll az alap szürkületre
+        }, 60);
+    }
+}
+
+// 3. WEAPON INVENTORY SWITCHER (Fegyverváltás lekezelése billentyűre)
+window.addEventListener('keydown', (e) => {
+    if (e.key === "1") {
+        // Thompson kiválasztása
+        currentWeaponIndex = 0;
+        weaponSystemGroup.visible = true;
+        if (coltVisualGroup) coltVisualGroup.visible = false;
+        updateWeaponHUD();
+    }
+    if (e.key === "2") {
+        // Colt .45 kiválasztása
+        currentWeaponIndex = 1;
+        weaponSystemGroup.visible = false;
+        if (coltVisualGroup) coltVisualGroup.visible = true;
+        updateWeaponHUD();
+    }
+});
+
+function updateWeaponHUD() {
+    const currentWpn = weaponInventory[currentWeaponIndex];
+    document.getElementById('current-weapon-name').innerText = currentWpn.name;
+    document.getElementById('ammo-counter').innerText = currentWpn.ammo + " / " + currentWpn.maxAmmo;
+}
+
+// KORRIGÁLT KÖZÖS TÜZELÉSI INTEGRÁCIÓ (Felülírjuk az automata fegyverkezelést az új adatokkal)
+function processAdvancedCombatInput() {
+    let now = Date.now();
+    let currentWpn = weaponInventory[currentWeaponIndex];
+    
+    if (!combatState.triggerPulled) return;
+    if (now - combatState.lastWeaponFireTime < currentWpn.fireRate) return;
+    if (currentWpn.ammo <= 0) return;
+
+    // Lőszer csökkentés az inventoryban
+    currentWpn.ammo--;
+    combatState.lastWeaponFireTime = now;
+    document.getElementById('ammo-counter').innerText = currentWpn.ammo + " / " + currentWpn.maxAmmo;
+
+    // Vizuális effektek kiváltása fegyvertől függően
+    if (currentWeaponIndex === 0) {
+        // Thompson mozgás
+        weaponSystemGroup.position.z += 0.09;
+        flashVisualMesh.position.set(0, 0.04, -0.82);
+    } else {
+        // Colt mozgás (Nagyobb hátralökődés, tiszti fegyver!)
+        coltVisualGroup.position.z += 0.12;
+        coltVisualGroup.position.y += 0.04;
+        flashVisualMesh.position.set(0, 0.03, -0.25);
+    }
+
+    // Villanás aktiválása
+    flashVisualMesh.visible = true;
+    muzzleFlashLight.intensity = 5.0;
+
+    // Sebzés kiosztása az aktuális fegyver erejével (A Colt erősebbet sebez!)
+    const targetRaycaster = new THREE.Raycaster();
+    targetRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    
+    npcs.forEach(soldier => {
+        if (soldier.hp <= 0) return;
+        let intersects = targetRaycaster.intersectObject(soldier.mesh, true);
+        if (intersects.length > 0) {
+            soldier.hp -= currentWpn.damage;
+            if (soldier.hp <= 0) {
+                soldier.mesh.rotation.z = Math.PI / 2;
+                soldier.mesh.position.y = 0.35;
+                soldier.mesh.children[4].visible = false;
+            }
+        }
+    });
+
+    // Ha a Colt nem automata, akkor egy kattintás = egy lövés, elengedjük a ravaszt automatikusan
+    if (!currentWpn.automatic) {
+        combatState.triggerPulled = false;
+    }
+
+    setTimeout(() => {
+        flashVisualMesh.visible = false;
+        muzzleFlashLight.intensity = 0;
+    }, 40);
+}
+
+// 4. WEAPON INVENTORY AUTOMATA POZÍCIONÁLÓ CIKLUS
+function inventoryEngineLoop() {
+    requestAnimationFrame(inventoryEngineLoop);
+    
+    // Időjárás futtatása
+    updateWeatherSystem();
+    
+    // Tüzelés ellenőrzése
+    processAdvancedCombatInput();
+    
+    // Ha a Colt van kézben, azt is szinkronizáljuk a kamerával pozícióban
+    if (currentWeaponIndex === 1 && coltVisualGroup) {
+        coltVisualGroup.position.copy(camera.position);
+        coltVisualGroup.rotation.copy(camera.rotation);
+        
+        coltVisualGroup.translateZ(-0.4);
+        coltVisualGroup.translateY(-0.18);
+        coltVisualGroup.translateX(0.12);
+        
+        // Colt finom imbolgása séta közben
+        if (inputKeys['w'] || inputKeys['s'] || inputKeys['a'] || inputKeys['d']) {
+            let t = Date.now() * 0.006;
+            coltVisualGroup.position.y += Math.sin(t) * 0.004;
+        }
+        
+        // Lerp visszatérés visszarúgásból
+        coltVisualGroup.position.z = THREE.MathUtils.lerp(coltVisualGroup.position.z, coltVisualGroup.position.z, 0.15);
+    }
+}
+inventoryEngineLoop();
+</script>
+<div id="advanced-military-hud" style="position: absolute; top: 80px; left: 25px; pointer-events: none; z-index: 501; font-family: 'Courier New', monospace;">
+    <div style="background: rgba(15,20,15,0.8); padding: 8px 15px; border: 1px solid #00ff00; border-radius: 3px; color: #00ff00; font-size: 14px; box-shadow: 0 0 10px rgba(0,255,0,0.15);">
+        KATONAI RANG: <span id="player-military-rank" style="color: #fff; font-weight: bold;">KÖZLEGÉNY</span><br>
+        KATONAI PONTOK: <span id="player-military-score" style="color: #ffff00;">0 XP</span>
+    </div>
+    
+    <div id="grenade-danger-indicator" style="margin-top: 15px; background: rgba(180,0,0,0.85); color: #fff; padding: 6px 20px; border: 2px solid #ff0000; font-weight: bold; border-radius: 4px; display: none; animation: pulseEffect 0.4s infinite alternate; font-size: 14px; text-shadow: 1px 1px 2px #000;">
+        VIGYÁZZ! GRÁNÁT A KÖZELBEN!
+    </div>
+</div>
+
+<style>
+@keyframes pulseEffect {
+    0% { opacity: 0.4; transform: scale(0.95); }
+    100% { opacity: 1.0; transform: scale(1.05); }
+}
+</style>
+
+<script>
+// Globális harcászati változók az új rendszerekhez
+const activeGrenades = [];
+let playerMilitaryScore = 0;
+let playerMilitaryRank = "KÖZLEGÉNY";
+let isAimingDownSights = false; // ADS állapot (Q gomb)
+
+const grenadeModelMat = new THREE.MeshStandardMaterial({ color: 0x3a3f3a, roughness: 0.8 });
+const grenadeHandleMat = new THREE.MeshStandardMaterial({ color: 0x6e4720, roughness: 0.9 });
+
+// 1. ADVANCED WEAPON ADS (AIM DOWN SIGHTS) RENDSZER LEKEZELÉSE
+// Lenyomva tartott Q betűvel lehet célozni a fegyver nézőkéjén keresztül
+window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'q') {
+        isAimingDownSights = true;
+        // Kamera ráközelít a célra (Zoom effektus, FOV csökkentése)
+        camera.fov = 40;
+        camera.updateProjectionMatrix();
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.key.toLowerCase() === 'q') {
+        isAimingDownSights = false;
+        // Visszaállítjuk az alap látószöget
+        camera.fov = 65;
+        camera.updateProjectionMatrix();
+    }
+});
+
+// RANKING ENGINE (Figyeli a pontokat és előlépteti a játékost)
+function addMilitaryScorePoints(amount) {
+    playerMilitaryScore += amount;
+    document.getElementById('player-military-score').innerText = playerMilitaryScore + " XP";
+    
+    let oldRank = playerMilitaryRank;
+    if (playerMilitaryScore >= 60) playerMilitaryRank = "TIZEDES";
+    if (playerMilitaryScore >= 120) playerMilitaryRank = "ŐRMESTER";
+    if (playerMilitaryScore >= 200) playerMilitaryRank = "HADNAGY";
+    if (playerMilitaryScore >= 300) playerMilitaryRank = "SZÁZADOS";
+    
+    if (oldRank !== playerMilitaryRank) {
+        document.getElementById('player-military-rank').innerText = playerMilitaryRank;
+        document.getElementById('mission-objective').innerText = "ELŐLÉPTETÉS! ÚJ RANGOD: " + playerMilitaryRank;
+        document.getElementById('mission-objective').style.color = "#ffff00";
+        setTimeout(() => {
+            if(!missionCompleted) {
+                document.getElementById('mission-objective').innerText = "ÁTTÖRÉS A BELVÁROSI BARIKÁDON";
+                document.getElementById('mission-objective').style.color = "#fff";
+            }
+        }, 3000);
+    }
+}
+
+// FELÜLÍRJUK A HALÁL REGISZTRÁCIÓT, HOGY ADJON PONTOT
+// Minden elhullott német katona +35 pontot ér a ranglétrán
+const originalNPCHitChecker = window.executeWeaponFireEvent;
+// Egy másodlagos figyelő, ami csekkolja az elhullottakat az XP-hez
+window.addEventListener('mousedown', () => {
+    if (document.pointerLockElement !== renderer.domElement) return;
+    
+    const xpRaycaster = new THREE.Raycaster();
+    xpRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    
+    npcs.forEach(soldier => {
+        if (soldier.hp > 0 && soldier.type === 'enemy') {
+            let intersects = xpRaycaster.intersectObject(soldier.mesh, true);
+            if (intersects.length > 0 && (soldier.hp - weaponInventory[currentWeaponIndex].damage) <= 0) {
+                // Ez a lövés terítette le! Szerezz pontot!
+                addMilitaryScorePoints(35);
+            }
+        }
+    });
+});
+
+// 2. ADVANCED NPC GRÁNÁTDOBÓ AI RENDSZER
+function npcThrowStielhandgranate(soldier) {
+    if (soldier.hp <= 0 || missionCompleted) return;
+    
+    const grenadeGroup = new THREE.Group();
+    
+    // Gránát fa nyele
+    const handleMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3), grenadeHandleMat);
+    handleMesh.rotateX(Math.PI / 2);
+    grenadeGroup.add(handleMesh);
+    
+    // Gránát robbanófej doboza
+    const headMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.16), grenadeModelMat);
+    headMesh.position.set(0, 0, -0.2);
+    headMesh.rotateX(Math.PI / 2);
+    grenadeGroup.add(headMesh);
+    
+    grenadeGroup.position.copy(soldier.mesh.position);
+    grenadeGroup.position.y = 1.8; // Kézmagasságból dobja el
+    scene.add(grenadeGroup);
+    
+    // Parabolikus ív számítása (Célpont a játékos aktuális helye)
+    let distanceX = camera.position.x - grenadeGroup.position.x;
+    let distanceZ = camera.position.z - grenadeGroup.position.z;
+    
+    // Dobási időtartam fixen 45 frame
+    let travelTimeFrames = 45;
+    
+    activeGrenades.push({
+        mesh: grenadeGroup,
+        vx: distanceX / travelTimeFrames,
+        vy: 0.28, // Kezdeti lökés felfelé a parabolához
+        vz: distanceZ / travelTimeFrames,
+        gravity: 0.013, // Gravitációs húzás frame-enként
+        timer: 120 // 120 ciklus múlva robban fel (kb 2 másodperc)
+    });
+}
+
+// 3. GRÁNÁTOK ÉS ADS POSITIONING ANIMÁCIÓS ENGINE CIKLUS
+function processGrenadesAndAdvancedCombat() {
+    let now = Date.now();
+    
+    // Véletlenszerű esély, hogy a közelben lévő aktív németek gránátot dobjanak ránk
+    npcs.forEach(soldier => {
+        if (soldier.hp > 0 && soldier.type === 'enemy') {
+            let distanceToPlayer = soldier.mesh.position.distanceTo(camera.position);
+            // Ha harci távolságban van (28 egység), és a szerencse úgy hozza (ritkán dobáljanak)
+            if (distanceToPlayer < 28 && Math.random() > 0.996) {
+                npcThrowStielhandgranate(soldier);
+            }
+        }
+    });
+    
+    let isAnyGrenadeClose = false;
+    
+    // Gránátok fizikájának frissítése loop-on belül
+    for (let g = activeGrenades.length - 1; g >= 0; g--) {
+        let gran = activeGrenades[g];
+        
+        gran.mesh.position.x += gran.vx;
+        gran.mesh.position.y += gran.vy;
+        gran.mesh.position.z += gran.vz;
+        
+        gran.vy -= gran.gravity; // Gravitáció alkalmazása
+        gran.mesh.rotation.x += 0.15; // Pörög a gránát a levegőben
+        
+        // Ha eléri a talajt, nem esik tovább lefelé
+        if (gran.mesh.position.y < 0.1) {
+            gran.mesh.position.y = 0.1;
+            gran.vx = 0; gran.vz = 0; gran.vy = 0; // Megáll a földön gurulva
+        }
+        
+        // Távolságmérés a veszélyjelző HUD-hoz
+        let distanceToPlayer = gran.mesh.position.distanceTo(camera.position);
+        if (distanceToPlayer < 12) {
+            isAnyGrenadeClose = true;
+        }
+        
+        gran.timer--;
+        // Időzítő lejárta -> BUMM!
+        if (gran.timer <= 0) {
+            spawnExplosionEffect(gran.mesh.position.x, gran.mesh.position.y, gran.mesh.position.z);
+            
+            // Ha a robbanás sugarában maradtál, sebződsz!
+            if (distanceToPlayer < 10) {
+                damagePlayer(); // Felfogja a pajzs vagy az életerő blokk
+                damagePlayer(); // Dupla sebzés a gránáttól, mert kemény!
+            }
+            
+            scene.remove(gran.mesh);
+            activeGrenades.splice(g, 1);
+        }
+    }
+    
+    // Gránát veszély HUD kijelző kapcsolása
+    const dangerUI = document.getElementById('grenade-danger-indicator');
+    if (dangerUI) {
+        dangerUI.style.display = isAnyGrenadeClose ? 'block' : 'none';
+    }
+}
+
+// ADS FEGYVER-ELHELYEZÉS FRISSÍTŐ VEZÉRLŐ (Módosítja a meglévő elhelyezést, ha célzol)
+function processAdvancedADSPositioning() {
+    requestAnimationFrame(processAdvancedADSPositioning);
+    
+    processGrenadesAndAdvancedCombat();
+    
+    // Ha a játékos lenyomva tartja a Q-t, áthúzzuk a fegyvert középre (Iron Sights mód)
+    if (isAimingDownSights) {
+        if (currentWeaponIndex === 0) {
+            // Thompson rátolása a képernyő mértani közepére
+            weaponSystemGroup.position.copy(camera.position);
+            weaponSystemGroup.rotation.copy(camera.rotation);
+            weaponSystemGroup.translateZ(-0.45);
+            weaponSystemGroup.translateY(-0.135); // Pontosan a szemvonal magasságába emeli
+            weaponSystemGroup.translateX(0.0);    // Középre húzza a jobb szélről!
+        } else if (currentWeaponIndex === 1 && coltVisualGroup) {
+            // Colt rátolása középre
+            coltVisualGroup.position.copy(camera.position);
+            coltVisualGroup.rotation.copy(camera.rotation);
+            coltVisualGroup.translateZ(-0.35);
+            coltVisualGroup.translateY(-0.09);
+            coltVisualGroup.translateX(0.0);
+        }
+    }
+}
+processAdvancedADSPositioning();
+</script>
+<script>
+// Globális változók a játékos saját gránátjaihoz és a 3D megjelenítéshez
+const playerActiveGrenades = [];
+let playerGrenadeVisualMesh = null;
+
+// Kiterjesztjük a fegyvertárat a gránáttal mint választható fegyverrel
+weaponInventory.push({ 
+    name: "MK 2 FRAG GRENADE", 
+    ammo: 5, 
+    maxAmmo: 5, 
+    fireRate: 800, 
+    damage: 150, 
+    automatic: false 
+});
+
+// 1. JÁTÉKOS MK 2 GOLYÓGRÁNÁT 3D MODELLJÉNEK FELÉPÍTÉSE
+function buildPlayerGrenadeModel() {
+    playerGrenadeVisualMesh = new THREE.Group();
+    const pineappleGreenMat = new THREE.MeshStandardMaterial({ color: 0x2e3d29, roughness: 0.85 });
+    const fuseMetalMat = new THREE.MeshStandardMaterial({ color: 0x7a7a7a, roughness: 0.4, metalness: 0.8 });
+
+    // Gránát recés teste (Pineapple body)
+    const bodyGeo = new THREE.SphereGeometry(0.07, 12, 12);
+    // Skálázással picit megnyújtjuk, hogy tojás alakú legyen
+    bodyGeo.scale(1, 1.3, 1);
+    const body = new THREE.Mesh(bodyGeo, pineappleGreenMat);
+    body.castShadow = true;
+    playerGrenadeVisualMesh.add(body);
+
+    // Gyújtószerkezet a tetején (Fuse)
+    const fuseGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.05, 8);
+    const fuse = new THREE.Mesh(fuseGeo, fuseMetalMat);
+    fuse.position.y = 0.11;
+    playerGrenadeVisualMesh.add(fuse);
+
+    // Biztosítószeg karja (Lever)
+    const leverGeo = new THREE.BoxGeometry(0.01, 0.08, 0.02);
+    const lever = new THREE.Mesh(leverGeo, fuseMetalMat);
+    lever.position.set(0.02, 0.07, 0);
+    lever.rotation.z = -0.15;
+    playerGrenadeVisualMesh.add(lever);
+
+    playerGrenadeVisualMesh.visible = false;
+    scene.add(playerGrenadeVisualMesh);
+}
+buildPlayerGrenadeModel();
+
+// 2. JÁTÉKOS GRÁNÁTDOBÁS MECHANIKA (G gomb vagy 3-as fegyver kattintás)
+function executePlayerGrenadeThrow() {
+    let grenadeWpn = weaponInventory[2]; // Az MK 2 gránát adatai
+    if (grenadeWpn.ammo <= 0) return;
+
+    grenadeWpn.ammo--;
+    updateWeaponHUD();
+
+    // Létrehozunk egy repülő gránátot a térben
+    const flyingGrenade = new THREE.Group();
+    
+    // Átmásoljuk a vizuális elemeket a repülő példányba
+    const bodyCopy = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshStandardMaterial({ color: 0x2e3d29, roughness: 0.8 }));
+    bodyCopy.castShadow = true;
+    flyingGrenade.add(bodyCopy);
+
+    // Indítási pozíció a játékos szemmagasságából (kamera helye)
+    flyingGrenade.position.copy(camera.position);
+    // Kicsit előrébb toljuk, hogy ne a fejünkből induljon
+    flyingGrenade.position.z -= 0.5;
+    scene.add(flyingGrenade);
+
+    // Dobási irány vektor kiszámítása a kamera nézési iránya alapján
+    const throwDirection = new THREE.Vector3();
+    camera.getWorldDirection(throwDirection);
+
+    // Dobás ereje (előre lökés és egy jókora felfelé ívelő vektor)
+    let throwPower = 0.45;
+    playerActiveGrenades.push({
+        mesh: flyingGrenade,
+        vx: throwDirection.x * throwPower,
+        vy: throwDirection.y * throwPower + 0.18, // Felfelé dobási ív hozzáadása
+        vz: throwDirection.z * throwPower,
+        gravity: 0.012,
+        timer: 100 // 100 frame múlva robban (kb. 1.7 másodperc)
+    });
+
+    // Ha a gránát fegyver volt a kézben, és elfogyott, visszaváltunk a Thompsonra
+    if (grenadeWpn.ammo === 0 && currentWeaponIndex === 2) {
+        setTimeout(() => {
+            if(currentWeaponIndex === 2) {
+                currentWeaponIndex = 0;
+                weaponSystemGroup.visible = true;
+                playerGrenadeVisualMesh.visible = false;
+                updateWeaponHUD();
+            }
+        }, 1000);
+    }
+}
+
+// 3. EXTRA BILLENTYŰZET INPUT INTERFÉSZ A FRISSÍTETT MECHANIKÁHOZ
+window.addEventListener('keydown', (e) => {
+    let key = e.key.toLowerCase();
+    
+    // 3-as gomb: Gránát kiválasztása kézbe
+    if (key === "3") {
+        currentWeaponIndex = 2;
+        weaponSystemGroup.visible = false;
+        if (coltVisualGroup) coltVisualGroup.visible = false;
+        if (playerGrenadeVisualMesh) playerGrenadeVisualMesh.visible = true;
+        updateWeaponHUD();
+    }
+
+    // G gomb: AZONNALI GRÁNÁTDOBÁS (Bármelyik fegyver van a kezedben!)
+    if (key === "g") {
+        executePlayerGrenadeThrow();
+    }
+});
+
+// 4. GRÁNÁTFIZIKA ÉS SEBZÉSI SUGÁR ELLENŐRZŐ MOTOR
+function processPlayerGrenadePhysics() {
+    for (let i = playerActiveGrenades.length - 1; i >= 0; i--) {
+        let pGran = playerActiveGrenades[i];
+        
+        // Mozgás alkalmazása a vektorok szerint
+        pGran.mesh.position.x += pGran.vx;
+        pGran.mesh.position.y += pGran.vy;
+        pGran.mesh.position.z += pGran.vz;
+        
+        // Gravitáció folyamatos lehúzása
+        pGran.vy -= pGran.gravity;
+        // Pörgés forgás a levegőben a látvány kedvéért
+        pGran.mesh.rotation.x += 0.2;
+        pGran.mesh.rotation.y += 0.1;
+
+        // Talajjal való ütközés detektálása (Földön gurulás)
+        if (pGran.mesh.position.y < 0.15) {
+            pGran.mesh.position.y = 0.15;
+            pGran.vy = -pGran.vy * 0.3; // Kicsi pattanás effektus (energiavesztés)
+            pGran.vx *= 0.85; // Súrlódás lassítja a gurulást X tengelyen
+            pGran.vz *= 0.85; // Súrlódás lassítja a gurulást Z tengelyen
+        }
+
+        pGran.timer--;
+        
+        // HA LEJÁR AZ IDŐZÍTŐ: HATALMAS JÁTÉKOS ROBBANÁS
+        if (pGran.timer <= 0) {
+            // Robbanási részecskék indítása a becsapódási ponton
+            spawnExplosionEffect(pGran.mesh.position.x, pGran.mesh.position.y, pGran.mesh.position.z);
+            
+            // Sugárirányú sebzés ellenőrzése minden NPC katonára!
+            npcs.forEach(soldier => {
+                if (soldier.hp > 0) {
+                    let distanceToExplosion = pGran.mesh.position.distanceTo(soldier.mesh.position);
+                    
+                    // Ha a katona 16 egységnél közelebb állt a gránátodhoz
+                    if (distanceToExplosion < 16) {
+                        let damageFalloff = Math.floor(weaponInventory[2].damage * (1 - (distanceToExplosion / 16)));
+                        
+                        // Ha ez a brutális repeszsebzés megöli a németet, pontot kapsz érte!
+                        if (soldier.type === 'enemy' && (soldier.hp - damageFalloff) <= 0) {
+                            addMilitaryScorePoints(35);
+                        }
+                        
+                        soldier.hp -= damageFalloff;
+                        
+                        // Halál animáció aktiválása gránáttalálatnál
+                        if (soldier.hp <= 0) {
+                            soldier.mesh.rotation.z = Math.PI / 2;
+                            soldier.mesh.position.y = 0.35;
+                            soldier.mesh.children[4].visible = false;
+                        }
+                    }
+                }
+            });
+
+            // Megnézzük, hogy a Tank közelében robbant-e fel, mert a gránát a tankot is sebzi!
+            if (tankObject && tankObject.hp > 0) {
+                let distToTank = pGran.mesh.position.distanceTo(tankObject.mesh.position);
+                if (distToTank < 20) {
+                    tankObject.hp -= 80;
+                    if (tankObject.hp <= 0) {
+                        // Elpusztult a Tiger tank!
+                        tankObject.mesh.rotation.x = 0.15; // Megroggyan a tank váz
+                        document.getElementById('mission-objective').innerText = "TIGER TANK MEGSEMMISÍTVE! KÉSZÜLJ A DIADALRA!";
+                        document.getElementById('mission-objective').style.color = "#ffff00";
+                        addMilitaryScorePoints(100); // 100 bónusz XP a tankért!
+                    }
+                }
+            }
+
+            // Törlés a színtérről és a memóriából
+            scene.remove(pGran.mesh);
+            playerActiveGrenades.splice(i, 1);
+        }
+    }
+}
+
+// 5. FEGYVERTÁR ÉS GRÁNÁT-VIZUALIZÁCIÓS FŐ LOOP FRISSÍTÉS
+function advancedInventoryUpdateLoop() {
+    requestAnimationFrame(advancedInventoryUpdateLoop);
+    
+    // Játékos saját gránátjainak fizikája
+    processPlayerGrenadePhysics();
+    
+    // Ha a 3-as gránát van kiválasztva és kézben tartjuk
+    if (currentWeaponIndex === 2 && playerGrenadeVisualMesh && !isAimingDownSights) {
+        playerGrenadeVisualMesh.position.copy(camera.position);
+        playerGrenadeVisualMesh.rotation.copy(camera.rotation);
+        
+        // Jobb kéz pozíció az FPS nézetben
+        playerGrenadeVisualMesh.translateZ(-0.35);
+        playerGrenadeVisualMesh.translateY(-0.16);
+        playerGrenadeVisualMesh.translateX(0.1);
+        
+        // Ha sétálsz, finoman billegjen a gránát is a kezedben
+        if (inputKeys['w'] || inputKeys['s'] || inputKeys['a'] || inputKeys['d']) {
+            let wave = Math.sin(Date.now() * 0.007) * 0.003;
+            playerGrenadeVisualMesh.position.y += wave;
+        }
+    }
+    
+    // Biztosítjuk, hogy egérkattintásra (MouseDown) el lehessen dobni a gránátot, ha a 3-as van kézben
+    let currentWpn = weaponInventory[currentWeaponIndex];
+    if (currentWeaponIndex === 2 && combatState.triggerPulled) {
+        executePlayerGrenadeThrow();
+        combatState.triggerPulled = false; // Egyszeri dobás kattintásonként
+    }
+}
+advancedInventoryUpdateLoop();
+</script>
+<script>
+// Textúra loader a Three.js-ből a katonai színekhez
+const textureLoader = new THREE.TextureLoader();
+
+// MOH-stílusú, kopottas textúra-generálás (procedurális)
+function createMOHStyleMaterial(baseColor, isHelmet) {
+    // Élethűbb, kicsit szemcsés, "retró" hatás
+    return new THREE.MeshStandardMaterial({
+        color: baseColor,
+        roughness: isHelmet ? 0.4 : 0.8,
+        metalness: isHelmet ? 0.3 : 0.0,
+        bumpScale: 0.1
+    });
+}
+
+// ÚJRADEFINIÁLJUK A KATONA MEGJELENÉSÉT A KORÁBBI FUNKCIÓKBAN
+// A már meglévő spawnLivingSoldier függvényt ezzel a "szépítő" réteggel egészítjük ki:
+
+function applyMOHStyleToNPC(npcObj) {
+    // Katonák törzsének "tereptarka" hatása
+    npcObj.torso.material = new THREE.MeshStandardMaterial({ 
+        color: npcObj.type === 'enemy' ? 0x4a4d46 : 0x3d4f36, 
+        roughness: 0.9 
+    });
+    
+    // SISAKOK: Az ikonikus "MOH acélsisak" forma és fény
+    const helmet = npcObj.mesh.children[0].children[1];
+    if (helmet) {
+        helmet.material = new THREE.MeshStandardMaterial({ 
+            color: 0x2e332c, 
+            roughness: 0.3, 
+            metalness: 0.5 
+        });
+    }
+}
+
+// FRISSÍTJÜK A MÁR LÉVŐ NPC-KET
+npcs.forEach(npc => applyMOHStyleToNPC(npc));
+
+// A fegyverek vizuális tuningja (olajos-fém hatás)
+weaponSystemGroup.children.forEach(part => {
+    if (part.material) {
+        part.material.metalness = 0.9;
+        part.material.roughness = 0.2;
+    }
+});
+
+console.log("MOH grafikai engine inicializálva: Karakterek és fegyverek finomhangolva.");
+</script>
+<!-- ============================================================================
+     10. RÉSZ: GYŐZELMI STATISZTIKA ÉS JÁTÉKOS-FINÁLÉ (Lezáró blokk)
+     ============================================================================ -->
+<div id="final-stats-screen" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); color: #fff; display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; font-family: sans-serif;">
+    <h1 style="color: #ffff00; font-size: 48px;">KÜLDETÉS TELJESÍTVE</h1>
+    <p style="font-size: 24px;">Budapest felszabadítva a megszállók alól.</p>
+    <div id="stats-content" style="margin: 20px; text-align: left; border: 1px solid #555; padding: 20px;"></div>
+    <button onclick="location.reload()" style="padding: 10px 20px; font-size: 18px; cursor: pointer;">ÚJRAJÁTSZÁS</button>
+</div>
+
+<script>
+function showFinalVictoryScreen() {
+    const screen = document.getElementById('final-stats-screen');
+    const content = document.getElementById('stats-content');
+    screen.style.display = 'flex';
+    content.innerHTML = `
+        Rang: ${playerMilitaryRank}<br>
+        Összesített XP: ${playerMilitaryScore}<br>
+        Maradék lőszer: ${weaponInventory[0].ammo + weaponInventory[1].ammo}<br>
+        Tank állapota: ${tankObject.hp <= 0 ? 'MEGSEMMISÍTVE' : 'ÉP'}<br>
+        <br>
+        <em>Köszönjük a szolgálatot, katona!</em>
+    `;
+}
+
+// Módosítsuk a korábbi checkVictoryCondition függvényt:
+const originalVictoryCheck = checkVictoryCondition;
+checkVictoryCondition = function() {
+    originalVictoryCheck();
+    if (missionCompleted && document.getElementById('final-stats-screen').style.display === 'none') {
+        setTimeout(showFinalVictoryScreen, 2000);
+    }
+};
+</script>
+<!-- ============================================================================
+     11. RÉSZ: SZINT-GENERÁTOR ÉS PÁLYA-PROGRESSZIÓ ENGINE
+     (Ezzel a szintek dinamikusan nehezednek!)
+     ============================================================================ -->
+<script>
+let currentLevel = 1;
+
+function loadNextLevel() {
+    currentLevel++;
+    document.getElementById('mission-objective').innerText = "SZINT: " + currentLevel + " - ELLENSÉG ERŐSÍTÉS ÉRKEZETT!";
+    
+    // Megnöveljük a nehézséget:
+    // 1. Több ellenség
+    spawnMoreEnemies(currentLevel * 5); 
+    // 2. Tank HP növelése
+    if(tankObject) tankObject.hp += 200;
+    // 3. Játékos reset (pozíció vissza az utca elejére)
+    player.z = 0;
+    missionCompleted = false;
+    
+    console.log("Szint váltva: " + currentLevel);
+}
+
+function spawnMoreEnemies(count) {
+    for(let i = 0; i < count; i++) {
+        // Véletlenszerű pozíciók a pesti utcán
+        let rx = (Math.random() - 0.5) * 50;
+        let rz = -20 - (Math.random() * 150);
+        spawnLivingSoldier(rx, rz); // Feltételezve, hogy a spawnLivingSoldier függvény megvan
+    }
+}
+
+// Módosítjuk a győzelmi ellenőrzést, hogy szinteket léptessen
+const oldVictory = checkVictoryCondition;
+checkVictoryCondition = function() {
+    if (player.z <= -185 && !missionCompleted) {
+        if(currentLevel < 3) {
+            loadNextLevel(); // Lépj a következő szintre
+        } else {
+            showFinalVictoryScreen(); // Vége a játéknak
+        }
+    }
+};
+</script>
